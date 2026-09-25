@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+
+# Secrets — never commit environment files or credentials
+.env*
+!.env.example
+
+# Editor / OS noise
+.DS_Store

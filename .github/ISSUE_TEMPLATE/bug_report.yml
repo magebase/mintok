@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a problem with MinTok
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: >
+        Include the command you ran and the relevant output.
+        Do NOT include secrets, credentials, or personal data.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: A small synthetic code sample (not a real repository).
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `uv run mintok --version`
+    validations:
+      required: false
