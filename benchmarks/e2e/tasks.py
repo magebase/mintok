@@ -415,13 +415,11 @@ ok = True
             "Move the `stable_hash` function from src/mintok/ir.py into a new module "
             "src/mintok/hashing.py. `from mintok.ir import stable_hash` must keep "
             "working (re-export), all internal uses under src/ should import from "
-            "the new module, and the full test suite must pass. You may create new "
-            "files with the shell; never read or edit existing repository files "
-            "except through the mintok ABI."
+            "the new module, and the full test suite must pass. You may create new files."
         ),
         "check": """
 import subprocess, sys
-code = "from mintok.ir import stable_hash as a; from mintok.hashing import semantic_hash as b; assert a is b"
+code = "from mintok.ir import stable_hash as a; from mintok.hashing import stable_hash as b; assert a is b"
 res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
 assert res.returncode == 0, res.stderr
 ok = True
@@ -434,8 +432,7 @@ ok = True
             "Create src/mintok/errors.py defining `class MintokError(Exception)`, "
             "make `ChangeRejected` in src/mintok/abi.py inherit from it (class-level "
             "edit), and keep `from mintok.abi import ChangeRejected` working. Suite "
-            "passes. You may create new files with the shell; never read or edit "
-            "existing repository files except through the mintok ABI."
+            "passes. You may create new files."
         ),
         "check": """
 from mintok.errors import MintokError

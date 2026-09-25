@@ -25,6 +25,7 @@ HARNESS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HARNESS_ROOT / "src"))
 
 from mintok.abi import AgentABI  # noqa: E402
+from mintok.tokens import estimate_tokens  # noqa: E402
 
 VENV_PY = HARNESS_ROOT / ".venv" / "bin" / "python"
 
@@ -95,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.tool == "change":
-        entry["args"] = {"target": args.target}
+        entry["args"] = {"target": args.target, "source_tokens": estimate_tokens(source)}
         if args.stdin:
             source = sys.stdin.read()
         else:
