@@ -147,7 +147,7 @@ import mintok.compiler.python as cpm
 assert not hasattr(cpm, "module_name")
 from mintok.compiler.python import dotted_module
 from pathlib import Path
-assert dotted_module(Path("src/mintok/__init__.py")) == "mintok"
+assert dotted_module(Path("src/mintok/__init__.py")) == "src.mintok"
 ok = True
 """,
     },
@@ -469,10 +469,10 @@ ok = True
             "`fact_count` property (number of facts). Suite passes."
         ),
         "check": """
-from mintok.ir import ProgramIR
+from mintok.ir import Fact, ProgramIR
 ir = ProgramIR()
 assert ir.fact_count == 0
-ir.facts.append(type(ir.facts[0])("s", "p", "o"))
+ir.facts.append(Fact("s", "p", "o", 1.0))
 assert ir.fact_count == 1
 ok = True
 """,
