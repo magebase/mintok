@@ -105,6 +105,12 @@ class AddResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PatchResult:
+    path: str
+    replaced_lines: int
+
+
+@dataclass(frozen=True, slots=True)
 class VerifyResult:
     passed: bool
     exit_code: int
@@ -273,6 +279,74 @@ class AgentABI:
         if symbol_id not in self.ir.symbols:
             raise ChangeRejected(f"{symbol_id} was not indexed after writing {module_path}")
         return AddResult(self.ir.symbols[symbol_id], created_file)
+
+    def inspect(self, symbol_id: str) -> str:
+        """One-call bundle for a known symbol: L2 rendering plus callers."""
+        self._symbol(symbol_id)
+        text = self.get_summary(symbol_id)
+        callers = self.get_callers(symbol_id)
+        if callers:
+            text += "\ncallers:"
+            text += "\n" + "\n".join(f"  {f.subject} {f.confidence:.2f}" for f in callers[:10])
+        return text
+
+    def task_packet(self, description: str) -> str:
+        """Local planner: resolve a description and assemble the change bundle.
+
+        One frontier round-trip instead of several: target resolution, L2
+        semantics, callers, source span, and referencing tests.
+        """
+        matches = [s for s in self.find_symbols(description) if s.kind != "constant"]
+        if not matches:
+            matches = self.find_symbols(description)
+        if not matches:
+            raise ChangeRejected(f"no symbol matches {description!r}")
+        sym = matches[0]
+        text = f"target {sym.id}\nsignature: {sym.signature}\n{self.inspect(sym.id)}\n"
+        text += f"source: {sym.source.path}:{sym.source.start_line}-{sym.source.end_line}\n"
+        short = sym.name.rsplit(".", 1)[-1]
+        tests_dir = self.root / "tests"
+        if tests_dir.is_dir():
+            referencing = sorted(
+                {
+                    p.relative_to(self.root).as_posix()
+                    for p in tests_dir.rglob("*.py")
+                    if short in p.read_text()
+                }
+            )
+            text += "tests: " + (", ".join(referencing[:5]) if referencing else "(none)") + "\n"
+        else:
+            text += "tests: (none)\n"
+        return text
+
+    def patch(self, file_path: str, start: int, end: int, source: str) -> PatchResult:
+        """Escape hatch: replace a 1-based inclusive line range, keeping the file parseable.
+
+        Covers everything symbol-level ops cannot express (module docstrings,
+        import lines, test files); the parse check is the only guardrail.
+        """
+        path = self.root / file_path
+        if not path.is_file():
+            raise ChangeRejected(f"unknown file {file_path}")
+        if start < 1 or end < start or end > len(path.read_text().splitlines()):
+            raise ChangeRejected("invalid line range")
+        new_src = textwrap.dedent(source).strip("\n")
+        if not new_src:
+            raise ChangeRejected("empty patch; use the remove op to delete symbols")
+        try:
+            ast.parse(new_src)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"patch does not parse: {exc.msg}") from None
+        lines = path.read_text().splitlines()
+        updated = lines[: start - 1] + new_src.splitlines() + lines[end:]
+        text = "\n".join(updated) + "\n"
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"file would not parse after patch: {exc.msg}") from None
+        path.write_text(text)
+        self.ir = compile_repository(self.root)
+        return PatchResult(file_path, end - start + 1)
 
     def remove(self, symbol_id: str) -> RemoveResult:
         """Delete one indexed symbol's span; report symbols that still reference it."""

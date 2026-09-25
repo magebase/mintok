@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
@@ -154,32 +155,61 @@ def report() -> None:
         arm = path.stem
         arms[arm] = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
-    header = f"{'arm':<10}{'tasks':>7}{'solved':>8}{'solve%':>8}{'turns':>7}{'tool_out_tok':>14}{'in_tok/solved':>15}{'s/Mtok':>8}"
-    lines = [header, "-" * len(header)]
+    header = (
+        f"{'arm':<10}{'tasks':>7}{'solved':>8}{'solve%':>8}"
+        f"{'tn/att':>8}{'tn/solv':>9}{'tok/att':>9}{'tok/solv':>10}{'s/Mtok':>8}"
+    )
+    print(header)
+    print("-" * len(header))
     for arm, rows in arms.items():
+        n = len(rows)
         solved = sum(r["solved"] for r in rows)
-        out_tok = sum(r["input_tokens"] for r in rows)  # RunRecord.input_tokens = tool outputs + prompt
-        per_solved = out_tok / solved if solved else float("inf")
-        solve_m = (solved / out_tok * 1_000_000) if out_tok else 0.0
-        lines.append(
-            f"{arm:<10}{len(rows):>7}{solved:>8}{100 * solved / len(rows):>7.0f}%"
-            f"{sum(r['turns'] for r in rows):>7}{out_tok:>14}{per_solved:>15.0f}{solve_m:>8.2f}"
+        out_tok = sum(r["input_tokens"] for r in rows)  # tool outputs + prompt
+        turns = sum(r["turns"] for r in rows)
+        print(
+            f"{arm:<10}{n:>7}{solved:>8}{100 * solved / n:>7.0f}%"
+            f"{turns / n:>8.1f}{(turns / solved) if solved else float('inf'):>9.1f}"
+            f"{out_tok / n:>9.0f}{(out_tok / solved) if solved else float('inf'):>10.0f}"
+            f"{(solved / out_tok * 1_000_000) if out_tok else 0.0:>8.2f}"
         )
-    print("\n".join(lines))
 
-    print("\nper-task paired view (control vs mintok tool-context tokens):")
+    print("\npaired ratios on jointly solved tasks (control tokens / other-arm tokens):")
     by_task: dict[str, dict[str, dict]] = {}
     for arm, rows in arms.items():
         for r in rows:
             by_task.setdefault(r["task_id"], {})[arm] = r
+    base = "control" if "control" in arms else next(iter(arms))
+    for arm in sorted(arms):
+        if arm == base:
+            continue
+        ratios = []
+        for task_id, pair in sorted(by_task.items()):
+            c, m = pair.get(base), pair.get(arm)
+            if c and m and c["solved"] and m["solved"] and m["input_tokens"]:
+                ratios.append(c["input_tokens"] / m["input_tokens"])
+        if not ratios:
+            print(f"  {base} vs {arm}: no jointly solved tasks")
+            continue
+        geo = math.exp(sum(math.log(r) for r in ratios) / len(ratios))
+        wins = sum(r > 1 for r in ratios)
+        print(
+            f"  {base} vs {arm:<10} n={len(ratios):>2}  geomean {geo:>5.2f}x  "
+            f"median {sorted(ratios)[len(ratios) // 2]:>5.2f}x  "
+            f"min {min(ratios):>5.2f}x  max {max(ratios):>6.2f}x  wins {wins}/{len(ratios)}"
+        )
+
+    print("\nper-task paired view (control vs each arm, tool-context tokens):")
     for task_id in sorted(by_task):
         pair = by_task[task_id]
-        c = pair.get("control", {})
-        m = pair.get("mintok", {})
-        ct, mt = c.get("input_tokens", 0), m.get("input_tokens", 0)
-        ratio = f"{ct / mt:>5.1f}x" if mt else "   -- "
-        mark = lambda a: "OK " if a.get("solved") else ("NO " if a else "-- ")  # noqa: E731
-        print(f"{task_id:<32}{mark(c)}{mark(m)}  {ct:>6} {mt:>6} {ratio}")
+        cells = []
+        for arm in [base] + sorted(a for a in arms if a != base):
+            r = pair.get(arm)
+            if not r:
+                cells.append(f"{arm[:4]}:  --  ")
+            else:
+                mark = "OK" if r["solved"] else "NO"
+                cells.append(f"{arm[:4]}:{mark}{r['input_tokens']:>6}")
+        print(f"{task_id:<32}" + "  ".join(cells))
 
 
 def main() -> None:

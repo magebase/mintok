@@ -175,6 +175,44 @@ Feature: Agent ABI
     And the file "modfuture.py" includes the line "from billing import MAX_RETRIES"
     And the line "from __future__ import annotations" comes first in "modfuture.py"
 
+  @domain
+  Scenario: One inspect call returns the full picture of a symbol
+    Given the repository is compiled
+    When the agent inspects "billing:Gateway.refund"
+    Then the answer includes "refund(self, payment_id, amount)"
+    And the answer includes "callers"
+    And the answer includes "billing:Payment.refund"
+    And the answer does not include "def charge"
+
+  @domain
+  Scenario: A task packet assembles the change bundle in one call
+    Given the repository is compiled
+    When the agent requests a task packet for "refund"
+    Then the packet names "billing:Gateway.refund"
+    And the packet includes "signature"
+    And the packet includes "callers"
+    And the packet includes "source:"
+    And the packet includes "tests:"
+
+  @integration
+  Scenario: A patch replaces a line range and keeps the file parseable
+    Given the repository is compiled
+    When the agent patches "billing.py" lines 1 to 1 with:
+      """
+      MAX_RETRIES = 5
+      """
+    Then the patch is accepted
+    And the file "billing.py" includes the line "MAX_RETRIES = 5"
+
+  @integration
+  Scenario: A patch that breaks the file is rejected
+    Given the repository is compiled
+    When the agent patches "billing.py" lines 1 to 1 with:
+      """
+      MAX_RETRIES = (3
+      """
+    Then the patch is rejected with "does not parse"
+
   @integration
   Scenario: Verification returns a compact pass/fail result
     Given the repository is compiled

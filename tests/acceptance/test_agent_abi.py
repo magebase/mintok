@@ -143,6 +143,57 @@ def line_comes_first(ctx: SimpleNamespace, text: str, name: str, repo: Path) -> 
     assert text in lines and lines.index(text) == 0, lines[:3]
 
 
+@when(parsers.parse('the agent inspects "{sid}"'))
+def agent_inspect(ctx: SimpleNamespace, repo: Path, sid: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    ctx.answer = ctx.abi.inspect(sid)
+
+
+@when(parsers.parse('the agent requests a task packet for "{description}"'))
+def agent_packet(ctx: SimpleNamespace, repo: Path, description: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.packet = ctx.abi.task_packet(description)
+        ctx.packet_error = None
+    except ChangeRejected as exc:
+        ctx.packet = None
+        ctx.packet_error = str(exc)
+
+
+@then(parsers.parse('the packet names "{sid}"'))
+def packet_names(ctx: SimpleNamespace, sid: str) -> None:
+    assert ctx.packet_error is None, ctx.packet_error
+    assert f"target {sid}" in ctx.packet, ctx.packet
+
+
+@then(parsers.parse('the packet includes "{section}"'))
+def packet_includes(ctx: SimpleNamespace, section: str) -> None:
+    assert section in ctx.packet, ctx.packet
+
+
+@when(parsers.parse('the agent patches "{name}" lines {start:d} to {end:d} with:'))
+def agent_patch(
+    ctx: SimpleNamespace, repo: Path, name: str, start: int, end: int, docstring: str
+) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.patch_result = ctx.abi.patch(name, start, end, docstring)
+        ctx.patch_error = None
+    except ChangeRejected as exc:
+        ctx.patch_result = None
+        ctx.patch_error = str(exc)
+
+
+@then("the patch is accepted")
+def patch_accepted(ctx: SimpleNamespace) -> None:
+    assert ctx.patch_error is None, ctx.patch_error
+
+
+@then(parsers.parse('the patch is rejected with "{text}"'))
+def patch_rejected(ctx: SimpleNamespace, text: str) -> None:
+    assert ctx.patch_error is not None and text in ctx.patch_error, ctx.patch_error
+
+
 @when(parsers.parse('the agent removes "{sid}"'))
 def agent_remove(ctx: SimpleNamespace, repo: Path, sid: str) -> None:
     ctx.abi = AgentABI(repo, ctx.ir)
