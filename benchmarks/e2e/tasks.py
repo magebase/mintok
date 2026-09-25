@@ -167,7 +167,7 @@ with contextlib.redirect_stdout(buf):
     code = main(["symbols", root])
 lines = buf.getvalue().splitlines()
 assert code == 0 and lines and all(" " in ln for ln in lines)
-assert any(ln.startswith("mintok.abi:") for ln in lines)
+assert any(ln.split(" ")[0].endswith("abi:AgentABI") for ln in lines)
 ok = True
 """,
     },
