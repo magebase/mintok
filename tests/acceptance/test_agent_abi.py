@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from pytest_bdd import parsers, scenarios, then, when
 
-from mintok.abi import TOOL_SURFACE, AgentABI, ChangeRejected, tool_surface_tokens
+from mintok.abi import TOOL_SURFACE, AgentABI, AddResult, ChangeRejected, tool_surface_tokens
 from mintok.tokens import estimate_tokens
 from tests.acceptance.helpers import split_list
 
@@ -87,6 +87,54 @@ def change_rejected(ctx: SimpleNamespace, text: str) -> None:
 def still_defines(ctx: SimpleNamespace, name: str, sid: str) -> None:
     assert sid in ctx.abi.ir.symbols
     assert ctx.abi.ir.symbols[sid].source.path == name
+
+
+@when(parsers.parse('the agent adds "{sid}" to "{path}" with source:'))
+def agent_add(ctx: SimpleNamespace, repo: Path, sid: str, path: str, docstring: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    _run_add(ctx, repo, sid, path, docstring, imports=None)
+
+
+@when(parsers.parse('the agent adds "{sid}" to "{path}" with imports "{imports}" and source:'))
+def agent_add_imports(
+    ctx: SimpleNamespace, repo: Path, sid: str, path: str, imports: str, docstring: str
+) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    _run_add(ctx, repo, sid, path, docstring, imports=imports)
+
+
+def _run_add(
+    ctx: SimpleNamespace, repo: Path, sid: str, path: str, source: str, imports: str | None
+) -> None:
+    ctx.existed_before = (repo / path).exists()
+    try:
+        ctx.add_result: AddResult | None = ctx.abi.add(
+            sid, source, path, imports=split_list(imports) if imports else ()
+        )
+        ctx.add_error = None
+    except ChangeRejected as exc:
+        ctx.add_result = None
+        ctx.add_error = str(exc)
+
+
+@then("the addition is accepted")
+def add_accepted(ctx: SimpleNamespace) -> None:
+    assert ctx.add_error is None, ctx.add_error
+
+
+@then("the addition created no file")
+def add_no_new_file(ctx: SimpleNamespace) -> None:
+    assert ctx.add_result.created_file is False
+
+
+@then(parsers.parse('the addition created the file "{name}"'))
+def add_created_file(ctx: SimpleNamespace, name: str) -> None:
+    assert ctx.add_result.created_file is True
+
+
+@then(parsers.parse('the addition is rejected with "{text}"'))
+def add_rejected(ctx: SimpleNamespace, text: str) -> None:
+    assert ctx.add_error is not None and text in ctx.add_error, ctx.add_error
 
 
 @when(parsers.parse('the agent removes "{sid}"'))

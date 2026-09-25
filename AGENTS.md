@@ -63,7 +63,7 @@ here will be declined. High-level thesis statements are fine; recipes are not.
 - **Agent Program IR v1** is open, versioned, model-independent: symbols, types, effects,
   relationships, source refs, confidence, provenance, hashes. Framework adapters compile
   into it.
-- **Agent ABI**: one compact interface (`query` / `change` / `verify`). Tool schemas are
+- **Agent ABI**: one compact interface (`query` / `change` / `add` / `remove` / `verify`). Tool schemas are
   context; keep the surface tiny and measure its token cost. The protocol reserves the
   `slice` op for the commercial build; the open reference build reports that clearly.
   Hard constraint: the frontier-facing surface stays within ~100–300 tokens (pinned by
@@ -125,7 +125,7 @@ src/mintok/
   records.py          open JSONL record formats (agent sessions, benchmark runs)
   profiler.py         avoidable-spend profiler (published formulas; capped at total spend)
   benchmark.py        Agent Efficiency Benchmark runner, paired report, savings summary
-  abi.py              Agent ABI + compact tool surface (query / change / verify)
+  abi.py              Agent ABI + compact tool surface (query / change / add / verify)
   pack.py             relearn packs: only interface-hash changes, body-only skipped
   bench.py            deterministic context-token benchmark vs grep-and-paging
   cli.py              mintok compile | diff | relearn | bench | slice (commercial) | --version

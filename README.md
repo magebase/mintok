@@ -22,7 +22,7 @@ the commercial **MinTok Inference Compiler** and is not published here.
 | Open in this repo | Commercial (not published) |
 |---|---|
 | Agent Program IR v1 (spec + JSON + reference compiler) | Task-specific context planner |
-| Agent ABI protocol (`query` / `change` / `verify`) | Program slicer |
+| Agent ABI protocol (`query` / `change` / `add` / `verify`) | Program slicer |
 | CLI (`compile`, `diff`) | Learned context policies |
 | Basic language parsers (Python) | Semantic cache optimizer |
 | Semantic diff | Model-specific context backends |

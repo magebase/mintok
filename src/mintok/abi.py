@@ -1,4 +1,4 @@
-"""Agent ABI: one compact interface over the semantic IR (query / change / verify)."""
+"""Agent ABI: one compact interface over the semantic IR (query / change / add / verify)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import ast
 import json
 import subprocess
 import textwrap
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,11 @@ TOOL_SURFACE: list[dict] = [
         "params": {"target": "symbol id", "source": "str"},
     },
     {
+        "name": "add",
+        "description": "Create a new top-level symbol in an existing or new module file",
+        "params": {"target": "new symbol id", "module": "file path", "source": "str"},
+    },
+    {
         "name": "verify",
         "description": "Run a check command; returns pass/fail and output tail",
         "params": {"argv": "list[str]"},
@@ -50,6 +56,29 @@ class ChangeRejected(ValueError):
     pass
 
 
+def _defined_name(node: ast.stmt) -> str | None:
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+        return node.targets[0].id
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return node.target.id
+    return None
+
+
+def _splice_imports(text: str, imports: Sequence[str]) -> str:
+    """Insert import lines after the module docstring (or at the top)."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return "\n".join(imports) + "\n\n" + text
+    line = 0
+    if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) and isinstance(tree.body[0].value.value, str):
+        line = tree.body[0].end_lineno or 0
+    lines = text.splitlines()
+    return "\n".join(lines[:line] + list(imports) + lines[line:]) + ("\n" if text.endswith("\n") else "")
+
+
 @dataclass(frozen=True, slots=True)
 class ChangeResult:
     symbol: Symbol
@@ -60,6 +89,12 @@ class ChangeResult:
 class RemoveResult:
     removed: Symbol
     dependents: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class AddResult:
+    symbol: Symbol
+    created_file: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +231,41 @@ class AgentABI:
         self.ir = compile_repository(self.root)
         new_sym = self.ir.symbols[symbol_id]
         return ChangeResult(new_sym, new_sym.interface_hash != sym.interface_hash)
+
+    def add(
+        self, symbol_id: str, source: str, module_path: str, imports: Sequence[str] = ()
+    ) -> AddResult:
+        """Create a new top-level symbol in an existing or new module file."""
+        if symbol_id in self.ir.symbols:
+            raise ChangeRejected(f"{symbol_id} is already indexed; use change")
+        new_src = textwrap.dedent(source).strip("\n")
+        try:
+            new_tree = ast.parse(new_src)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"new source does not parse: {exc.msg}") from None
+        short_name = symbol_id.rsplit(":", 1)[-1]
+        if len(new_tree.body) != 1 or _defined_name(new_tree.body[0]) != short_name:
+            raise ChangeRejected(f"new source must define exactly one symbol named {short_name}")
+
+        path = self.root / module_path
+        created_file = not path.exists()
+        if created_file:
+            text = "".join(f"{imp}\n" for imp in imports) + ("\n" if imports else "") + new_src + "\n"
+        else:
+            text = path.read_text()
+            if imports:
+                text = _splice_imports(text, imports)
+            text = text.rstrip("\n") + "\n\n\n" + new_src + "\n"
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"file would not parse after add: {exc.msg}") from None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        self.ir = compile_repository(self.root)
+        if symbol_id not in self.ir.symbols:
+            raise ChangeRejected(f"{symbol_id} was not indexed after writing {module_path}")
+        return AddResult(self.ir.symbols[symbol_id], created_file)
 
     def remove(self, symbol_id: str) -> RemoveResult:
         """Delete one indexed symbol's span; report symbols that still reference it."""

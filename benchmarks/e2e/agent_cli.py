@@ -59,6 +59,14 @@ def main(argv: list[str] | None = None) -> int:
     remove = sub.add_parser("remove", help="delete one indexed symbol via the mintok ABI")
     remove.add_argument("--target", required=True)
 
+    add = sub.add_parser("add", help="create a new top-level symbol via the mintok ABI")
+    add.add_argument("--target", required=True, help="new symbol id, e.g. mintok.errors:MintokError")
+    add.add_argument("--module", required=True, help="module file path relative to the root")
+    add.add_argument("--imports", nargs="*", default=[], help="import lines to splice at the top")
+    add_src = add.add_mutually_exclusive_group(required=True)
+    add_src.add_argument("--source-file")
+    add_src.add_argument("--stdin", action="store_true")
+
     verify = sub.add_parser("verify", help="run a check command via the mintok ABI")
     verify.add_argument("argv", nargs="+")
 
@@ -96,11 +104,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.tool == "change":
-        entry["args"] = {"target": args.target, "source_tokens": estimate_tokens(source)}
         if args.stdin:
             source = sys.stdin.read()
         else:
             source = Path(args.source_file).read_text()
+        entry["args"] = {"target": args.target, "source_tokens": estimate_tokens(source)}
         try:
             abi = AgentABI(args.root)
             result = abi.change(args.target, source)
@@ -131,6 +139,34 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         deps = ", ".join(result.dependents) if result.dependents else "none"
         entry["output"] = f"removed: {result.removed.id}\nremaining references from: {deps}"
+        entry["exit_code"] = 0
+        append(args.log, entry)
+        print(entry["output"])
+        return 0
+
+    if args.tool == "add":
+        if args.stdin:
+            source = sys.stdin.read()
+        else:
+            source = Path(args.source_file).read_text()
+        entry["args"] = {
+            "target": args.target,
+            "module": args.module,
+            "imports": len(args.imports),
+            "source_tokens": estimate_tokens(source),
+        }
+        try:
+            result = AgentABI(args.root).add(args.target, source, args.module, imports=args.imports)
+        except Exception as exc:  # noqa: BLE001 - the agent sees the failure
+            entry["output"] = f"rejected: {exc}"
+            entry["exit_code"] = 1
+            append(args.log, entry)
+            print(entry["output"])
+            return 1
+        entry["output"] = (
+            f"added: {result.symbol.id}\ncreated_file: {result.created_file}\n"
+            f"new_signature: {result.symbol.signature}"
+        )
         entry["exit_code"] = 0
         append(args.log, entry)
         print(entry["output"])

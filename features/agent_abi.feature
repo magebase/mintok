@@ -25,7 +25,7 @@ Feature: Agent ABI
 
   @domain
   Scenario: The exposed tool surface is tiny
-    Then the agent tool surface is exactly "query, change, verify"
+    Then the agent tool surface is exactly "query, change, add, verify"
     And the agent tool surface costs at most 300 tokens
 
   @domain
@@ -118,6 +118,42 @@ Feature: Agent ABI
     When the agent removes "billing:Gateway.refund"
     Then the removal is accepted
     And the removal reports remaining references from "billing:Payment.refund"
+
+  @integration
+  Scenario: A new symbol can be added to an existing module through the ABI
+    Given the repository is compiled
+    When the agent adds "billing:RefundReceipt" to "billing.py" with imports "from billing import MAX_RETRIES" and source:
+      """
+      class RefundReceipt:
+          def __init__(self, payment_id):
+              self.payment_id = payment_id
+      """
+    Then the addition is accepted
+    And the addition created no file
+    And file "billing.py" still defines "billing:RefundReceipt"
+    And the file "billing.py" includes the line "from billing import MAX_RETRIES"
+
+  @integration
+  Scenario: A new symbol can create its own module
+    Given the repository is compiled
+    When the agent adds "receipts:RefundReceipt" to "receipts.py" with source:
+      """
+      class RefundReceipt:
+          def total(self):
+              return 0
+      """
+    Then the addition is accepted
+    And the addition created the file "receipts.py"
+    And file "receipts.py" still defines "receipts:RefundReceipt"
+
+  @integration
+  Scenario: Adding an already-indexed symbol is rejected
+    Given the repository is compiled
+    When the agent adds "billing:MAX_RETRIES" to "billing.py" with source:
+      """
+      MAX_RETRIES = 9
+      """
+    Then the addition is rejected with "already indexed"
 
   @integration
   Scenario: Verification returns a compact pass/fail result
