@@ -63,11 +63,18 @@ here will be declined. High-level thesis statements are fine; recipes are not.
 - **Agent Program IR v1** is open, versioned, model-independent: symbols, types, effects,
   relationships, source refs, confidence, provenance, hashes. Framework adapters compile
   into it.
-- **Agent ABI**: one compact interface (`query` / `change` / `add` / `remove` / `verify`). Tool schemas are
+- **Agent ABI**: one compact interface (`query` / `change` / `add` / `remove` / `verify`), extended
+  with `inspect` (batched symbol bundle), `task_packet` (local planner), and `patch`
+  (line-range escape hatch). Tool schemas are
   context; keep the surface tiny and measure its token cost. The protocol reserves the
   `slice` op for the commercial build; the open reference build reports that clearly.
   Hard constraint: the frontier-facing surface stays within ~100–300 tokens (pinned by
   a scenario); complexity goes behind the ABI, never into more exposed tools.
+- **Hybrid operation (measured, not ideology).** The A–G ablation ladder
+  (`benchmarks/e2e/RESULTS.md`) shows semantic *reads* beat a shell-only control
+  on solve rate and tokens; semantic *edits* cost 1.5–2x tokens; an uncapped
+  breaker-unlocked shell doubles them again. Ship reads + attribution + bundle
+  by default; gate edits per task class; cap fallback output.
 - **Cache verifiable facts, not summaries.** Facts carry the source hash they were
   derived from and are invalidated by dependency tracking. Never store AI-written prose
   as truth.

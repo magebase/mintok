@@ -62,6 +62,53 @@ Where the task sits inside the ABI's model, it wins: up to 42x (control
 flailed reading a 25k-token file the ABI answered from one symbol page), 2.8x
 on symbol listing and case-sensitive lookup, ~1.4x on class-level edits.
 
+## V2 ablation ladder: where the loss lives
+
+After the v1 negative verdict, the architecture was changed from "ABI-only" to
+**hybrid**: semantic fast path + ordinary tools + escape hatches. The ablation
+ladder isolates which layer pays for itself (all arms on the V2 harness,
+commit 2814a75; policies in `agent_cli.py`):
+
+| arm | adds vs previous | solved | tn/att | tok/att | paired geomean vs control |
+|---|---|---|---|---|---|
+| control | shell only | 29/30 | 5.1 | 2,209 | — |
+| B | + semantic reads (`query find/symbol`) | **30/30** | 6.4 | **1,834** | 0.85x |
+| C | + attribution (`callers/writers/effects`) | **30/30** | 7.2 | **1,753** | 0.85x |
+| D | + batched bundle (`inspect`) | 29/30 | 8.5 | 1,938 | 0.82x |
+| E | + semantic edits (`change/add/remove/patch`) | 29/30 | 14.0 | 3,393 | 0.54x |
+| F | + circuit breaker (limits unlock shell) | 29/30 | 14.8 | 6,853 | 0.42x |
+| G | + local planner (`task_packet`) | 29/30 | 16.0 | 4,906 | 0.42x |
+| mintok | ABI-only (v1, no shell) | 26/30 | 16.8 | 2,570 | 0.82x |
+
+Findings (tool-context tokens; see caveats below):
+
+1. **The user hypothesis held for reads.** Arms B–C beat control on solve rate
+   (30/30 vs 29/30) *and* tokens (–17%/–21% tok/att) at a +25–40% turn cost.
+   Attribution (`callers/writers/effects`) is the cheapest per-token layer.
+2. **Semantic edits are the loss point.** E jumps to 1.5x control tokens and
+   2.7x turns: `change` makes the model re-emit whole function bodies. Hybrid
+   E still solved 29/30 — capability parity works — but tokens pay for it.
+3. **The circuit breaker fixed capability, not cost.** F solved the same 29/30
+   but tokens *doubled* vs E (6,853): when the breaker unlocks shell, workers
+   flood context with unfiltered shell output (worst: 94,747 tokens on
+   `add-cli-verify` vs 6,962 in E). An unlocked shell needs output capping,
+   not just access.
+4. **The packet planner did not pay off.** G is cheaper than F (workers fall
+   back to shell less) but still 2.2x control tokens; workers over-requested
+   packets (worst: 33,718 tokens on `new-ir-symbols-of-kind`). Packet reuse
+   and packet scoping need work before this layer earns its tokens.
+5. **`new-pack-is-empty` failed on control, D, E, F, G** (B and C solved it):
+   its edge case is a reading-comprehension trap, not a tooling difference.
+
+**Architectural conclusion:** ship B–D (semantic reads + attribution +
+bundle) behind ordinary tools; treat semantic *edits* as opt-in per task
+class; add output caps to breaker-unlocked shell; rework packet reuse before
+shipping `task_packet`.
+
+Caveats: control ran on pre-V2 copies (55–58 tests) while B–G ran on 63-test
+copies; `frontier_usd` remains unobservable (0.0 recorded); single run per
+cell (no temperature noise handling).
+
 ## Blockers to a $-denominated claim
 
 - **Billed cost is unobservable here.** Runs execute as harness subagents;

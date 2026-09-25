@@ -212,8 +212,12 @@ ok = True
 import contextlib, io
 from mintok.cli import build_parser, main
 buf = io.StringIO()
-with contextlib.redirect_stdout(buf):
-    code = main(["--ops"])
+code = None
+try:
+    with contextlib.redirect_stdout(buf):
+        code = main(["--ops"])
+except SystemExit as exc:
+    code = exc.code
 out = buf.getvalue().splitlines()
 assert code == 0 and "find" in out and "symbol" in out and "slice" not in out
 ok = True
