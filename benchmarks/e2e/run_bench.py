@@ -123,6 +123,7 @@ def record(arm: str, task_id: str, log: Path) -> None:
         task_id=task_id,
         arm=arm,
         solved=score["solved"],
+        frontier_usd=0.0,  # billed cost unobservable outside an API harness (see RESULTS.md)
         input_tokens=score["tool_output_tokens"] + score["prompt_tokens"],
         output_tokens=score["tool_input_tokens"],
         turns=score["turns"],
