@@ -67,6 +67,17 @@ def interface_unchanged(ctx: SimpleNamespace) -> None:
     assert ctx.change.interface_changed is False
 
 
+@then("the change reports the interface as changed")
+def interface_changed(ctx: SimpleNamespace) -> None:
+    assert ctx.change.interface_changed is True
+
+
+@then(parsers.parse('the file "{name}" includes the line "{text}"'))
+def file_includes_line(ctx: SimpleNamespace, repo: Path, name: str, text: str) -> None:
+    content = (repo / name).read_text()
+    assert any(text in line for line in content.splitlines()), content
+
+
 @then(parsers.parse('the change is rejected with "{text}"'))
 def change_rejected(ctx: SimpleNamespace, text: str) -> None:
     assert ctx.change_error is not None and text in ctx.change_error, ctx.change_error
@@ -76,6 +87,37 @@ def change_rejected(ctx: SimpleNamespace, text: str) -> None:
 def still_defines(ctx: SimpleNamespace, name: str, sid: str) -> None:
     assert sid in ctx.abi.ir.symbols
     assert ctx.abi.ir.symbols[sid].source.path == name
+
+
+@when(parsers.parse('the agent removes "{sid}"'))
+def agent_remove(ctx: SimpleNamespace, repo: Path, sid: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.remove_result = ctx.abi.remove(sid)
+        ctx.remove_error = None
+    except ChangeRejected as exc:
+        ctx.remove_result = None
+        ctx.remove_error = str(exc)
+
+
+@then("the removal is accepted")
+def removal_accepted(ctx: SimpleNamespace) -> None:
+    assert ctx.remove_error is None, ctx.remove_error
+
+
+@then("the removal reports no remaining references")
+def removal_no_dependents(ctx: SimpleNamespace) -> None:
+    assert ctx.remove_result.dependents == (), ctx.remove_result.dependents
+
+
+@then(parsers.parse('the removal reports remaining references from "{sids}"'))
+def removal_dependents(ctx: SimpleNamespace, sids: str) -> None:
+    assert sorted(ctx.remove_result.dependents) == sorted(split_list(sids)), ctx.remove_result.dependents
+
+
+@then(parsers.parse('the symbol "{sid}" is gone from the IR'))
+def symbol_gone(ctx: SimpleNamespace, sid: str) -> None:
+    assert sid not in ctx.abi.ir.symbols
 
 
 @then(parsers.parse('file "{name}" is unmodified'))

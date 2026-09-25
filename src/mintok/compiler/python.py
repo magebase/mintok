@@ -95,6 +95,16 @@ def _collect(name: str, path: str, tree: ast.Module) -> _Module:
                 if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     mid = f"{cid}.{item.name}"
                     module.defs[mid] = _Def(mid, "method", item, class_id=cid)
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            # Module-level constants are part of the learnable surface: agents
+            # query them, and removing/updating them is a normal agent task.
+            sid = f"{name}:{node.targets[0].id}"
+            module.defs[sid] = _Def(sid, "constant", node)
+            module.top_level[node.targets[0].id] = sid
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+            sid = f"{name}:{node.target.id}"
+            module.defs[sid] = _Def(sid, "constant", node)
+            module.top_level[node.target.id] = sid
     return module
 
 
@@ -203,7 +213,7 @@ def _extract_facts(
     methods_by_name: dict[str, list[str]],
     pkg_imports: dict[str, dict[str, tuple[str, str]]],
 ) -> list[Fact]:
-    if d.kind == "class":
+    if d.kind in ("class", "constant"):
         return []
     fn = d.node
     assert isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -255,6 +265,10 @@ def _normalized_dump(node: ast.AST) -> str:
 
 
 def _signature(node: ast.AST) -> str:
+    if isinstance(node, ast.Assign):
+        return f"{ast.unparse(node.targets[0])} = {ast.unparse(node.value)}"
+    if isinstance(node, ast.AnnAssign):
+        return f"{ast.unparse(node.target)}: {ast.unparse(node.annotation)} = {ast.unparse(node.value)}"
     if isinstance(node, ast.ClassDef):
         bases = ", ".join(ast.unparse(b) for b in node.bases)
         return f"class {node.name}({bases})" if bases else f"class {node.name}"
@@ -276,13 +290,18 @@ def _make_symbol(d: _Def, module: _Module, facts: list[Fact]) -> Symbol:
         interface = stable_hash(signature, *members)
     else:
         interface = stable_hash(signature, *(f"{f.predicate}|{f.object}|{f.confidence}" for f in facts))
+    # Decorators are part of the replaceable definition: the span starts at the
+    # first decorator so ``change`` can add, replace, or remove them.
+    start = node.lineno
+    if getattr(node, "decorator_list", None):
+        start = min(start, *(decorator.lineno for decorator in node.decorator_list))
     return Symbol(
         id=d.id,
         kind=d.kind,
         name=d.id.split(":", 1)[1],
         module=module.name,
         signature=signature,
-        source=SourceRef(module.path, node.lineno, node.end_lineno or node.lineno),
+        source=SourceRef(module.path, start, node.end_lineno or node.lineno),
         body_hash=stable_hash(_normalized_dump(node)),
         interface_hash=interface,
     )

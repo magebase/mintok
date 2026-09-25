@@ -28,7 +28,7 @@ TOOL_SURFACE: list[dict] = [
     },
     {
         "name": "change",
-        "description": "Replace one symbol's definition with new source",
+        "description": "Replace one symbol's definition with new source, or remove it (remove op)",
         "params": {"target": "symbol id", "source": "str"},
     },
     {
@@ -54,6 +54,12 @@ class ChangeRejected(ValueError):
 class ChangeResult:
     symbol: Symbol
     interface_changed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RemoveResult:
+    removed: Symbol
+    dependents: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,22 +156,29 @@ class AgentABI:
 
     def change(self, symbol_id: str, source: str) -> ChangeResult:
         sym = self._symbol(symbol_id)
-        if sym.kind == "class":
-            raise ChangeRejected("class-level replacement is not supported; change methods individually")
         new_src = textwrap.dedent(source).strip("\n")
         try:
             new_tree = ast.parse(new_src)
         except SyntaxError as exc:
             raise ChangeRejected(f"new source does not parse: {exc.msg}") from None
         short_name = sym.name.rsplit(".", 1)[-1]
-        if (
-            len(new_tree.body) != 1
-            or not isinstance(new_tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef))
-            or new_tree.body[0].name != short_name
-        ):
-            raise ChangeRejected(f"new source must define exactly one function named {short_name}")
-        if new_tree.body[0].decorator_list:
-            raise ChangeRejected("decorators are outside the replaced range; keep them unchanged")
+        if len(new_tree.body) != 1:
+            raise ChangeRejected(f"new source must define exactly one symbol named {short_name}")
+        new_node = new_tree.body[0]
+        if isinstance(new_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if sym.kind not in ("function", "method") or new_node.name != short_name:
+                raise ChangeRejected(f"new source must define exactly one function named {short_name}")
+        elif isinstance(new_node, ast.ClassDef):
+            if sym.kind != "class" or new_node.name != short_name:
+                raise ChangeRejected(f"new source must define exactly one class named {short_name}")
+        elif isinstance(new_node, (ast.Assign, ast.AnnAssign)):
+            target = new_node.target if isinstance(new_node, ast.AnnAssign) else new_node.targets[0]
+            if sym.kind != "constant" or not isinstance(target, ast.Name) or target.id != short_name:
+                raise ChangeRejected(f"new source must define exactly one assignment to {short_name}")
+            if isinstance(new_node, ast.AnnAssign) and new_node.value is None:
+                raise ChangeRejected("constants need a value; use the remove op to delete them")
+        else:
+            raise ChangeRejected(f"new source must define one function, class, or assignment named {short_name}")
 
         path = self.root / sym.source.path
         lines = path.read_text().splitlines()
@@ -183,6 +196,39 @@ class AgentABI:
         self.ir = compile_repository(self.root)
         new_sym = self.ir.symbols[symbol_id]
         return ChangeResult(new_sym, new_sym.interface_hash != sym.interface_hash)
+
+    def remove(self, symbol_id: str) -> RemoveResult:
+        """Delete one indexed symbol's span; report symbols that still reference it."""
+        sym = self._symbol(symbol_id)
+        dependents = tuple(
+            sorted(
+                {f.subject for f in self.ir.facts if f.object == symbol_id and f.subject != symbol_id}
+            )
+        )
+        path = self.root / sym.source.path
+        lines = path.read_text().splitlines()
+        original = lines[sym.source.start_line - 1]
+        indent = original[: len(original) - len(original.lstrip())]
+
+        def spliced(fill: list[str]) -> str:
+            body = lines[: sym.source.start_line - 1] + fill + lines[sym.source.end_line :]
+            return "\n".join(body) + ("\n" if body else "")
+
+        # Removing a class's last member would leave an empty body; keep the
+        # file parseable by splicing in ``pass`` at the same indentation.
+        text = spliced([])
+        if sym.kind == "method":
+            try:
+                ast.parse(text)
+            except SyntaxError:
+                text = spliced([f"{indent}pass"])
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"file would not parse after removal: {exc.msg}") from None
+        path.write_text(text)
+        self.ir = compile_repository(self.root)
+        return RemoveResult(sym, dependents)
 
     def verify(self, argv: list[str], timeout: float = 300.0, tail_lines: int = 20) -> VerifyResult:
         proc = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=timeout)

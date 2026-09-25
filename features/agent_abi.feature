@@ -5,6 +5,9 @@ Feature: Agent ABI
   Background:
     Given a repository file "billing.py":
       """
+      MAX_RETRIES = 3
+
+
       class Gateway:
           def refund(self, payment_id, amount):
               return True
@@ -56,6 +59,65 @@ Feature: Agent ABI
       """
     Then the change is rejected with "exactly one function named refund"
     And file "billing.py" is unmodified
+
+  @integration
+  Scenario: A change may add a decorator to a method
+    Given the repository is compiled
+    When the agent changes "billing:Payment.refund" to:
+      """
+      @functools.cache
+      def refund(self, amount: int) -> bool:
+          if amount <= 0:
+              raise ValueError()
+          Gateway().refund(self.id, amount)
+          self.refunded_amount = amount
+          return True
+      """
+    Then the change is accepted
+    And the file "billing.py" includes the line "@functools.cache"
+
+  @integration
+  Scenario: A class-level change replaces the whole class
+    Given the repository is compiled
+    When the agent changes "billing:Gateway" to:
+      """
+      class Gateway:
+          def refund(self, payment_id, amount):
+              return payment_id is not None
+
+          def charge(self, payment_id, amount):
+              return True
+      """
+    Then the change is accepted
+    And the change reports the interface as changed
+    And file "billing.py" still defines "billing:Gateway.charge"
+
+  @integration
+  Scenario: A module-level constant is indexed and replaceable
+    Given the repository is compiled
+    When the agent queries symbol "billing:MAX_RETRIES"
+    Then the answer includes "MAX_RETRIES = 3"
+    When the agent changes "billing:MAX_RETRIES" to:
+      """
+      MAX_RETRIES = 5
+      """
+    Then the change is accepted
+    And the change reports the interface as changed
+
+  @integration
+  Scenario: An unused constant can be removed through the ABI
+    Given the repository is compiled
+    When the agent removes "billing:MAX_RETRIES"
+    Then the removal is accepted
+    And the removal reports no remaining references
+    And the symbol "billing:MAX_RETRIES" is gone from the IR
+
+  @integration
+  Scenario: Removing a symbol that is still called reports the dependents
+    Given the repository is compiled
+    When the agent removes "billing:Gateway.refund"
+    Then the removal is accepted
+    And the removal reports remaining references from "billing:Payment.refund"
 
   @integration
   Scenario: Verification returns a compact pass/fail result
