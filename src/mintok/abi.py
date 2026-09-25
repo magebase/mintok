@@ -67,14 +67,21 @@ def _defined_name(node: ast.stmt) -> str | None:
 
 
 def _splice_imports(text: str, imports: Sequence[str]) -> str:
-    """Insert import lines after the module docstring (or at the top)."""
+    """Insert import lines after the docstring and any __future__ imports."""
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return "\n".join(imports) + "\n\n" + text
     line = 0
-    if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) and isinstance(tree.body[0].value.value, str):
-        line = tree.body[0].end_lineno or 0
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ) or (isinstance(node, ast.ImportFrom) and node.module == "__future__"):
+            line = node.end_lineno or line
+        else:
+            break
     lines = text.splitlines()
     return "\n".join(lines[:line] + list(imports) + lines[line:]) + ("\n" if text.endswith("\n") else "")
 

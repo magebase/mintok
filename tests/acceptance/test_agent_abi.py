@@ -137,6 +137,12 @@ def add_rejected(ctx: SimpleNamespace, text: str) -> None:
     assert ctx.add_error is not None and text in ctx.add_error, ctx.add_error
 
 
+@then(parsers.parse('the line "{text}" comes first in "{name}"'))
+def line_comes_first(ctx: SimpleNamespace, text: str, name: str, repo: Path) -> None:
+    lines = (repo / name).read_text().splitlines()
+    assert text in lines and lines.index(text) == 0, lines[:3]
+
+
 @when(parsers.parse('the agent removes "{sid}"'))
 def agent_remove(ctx: SimpleNamespace, repo: Path, sid: str) -> None:
     ctx.abi = AgentABI(repo, ctx.ir)

@@ -156,6 +156,26 @@ Feature: Agent ABI
     Then the addition is rejected with "already indexed"
 
   @integration
+  Scenario: Adding to a module with a __future__ import keeps it parseable
+    Given a repository file "modfuture.py":
+      """
+      from __future__ import annotations
+
+
+      def existing() -> bool:
+          return True
+      """
+    Given the repository is compiled
+    When the agent adds "modfuture:helper" to "modfuture.py" with imports "from billing import MAX_RETRIES" and source:
+      """
+      def helper() -> int:
+          return MAX_RETRIES
+      """
+    Then the addition is accepted
+    And the file "modfuture.py" includes the line "from billing import MAX_RETRIES"
+    And the line "from __future__ import annotations" comes first in "modfuture.py"
+
+  @integration
   Scenario: Verification returns a compact pass/fail result
     Given the repository is compiled
     When the agent verifies with a command that prints 50 lines and succeeds
