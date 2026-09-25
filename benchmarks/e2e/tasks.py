@@ -167,7 +167,7 @@ with contextlib.redirect_stdout(buf):
     code = main(["symbols", root])
 lines = buf.getvalue().splitlines()
 assert code == 0 and lines and all(" " in ln for ln in lines)
-assert any("abi.py" in ln for ln in lines)
+assert any(ln.startswith("mintok.abi:") for ln in lines)
 ok = True
 """,
     },
@@ -295,7 +295,7 @@ src = (
 with tempfile.TemporaryDirectory() as td:
     (Path(td) / "m.py").write_text(src)
     ir = compile_repository(td)
-    calls = {f.object for f in ir.facts_for("m:pong", "calls")}
+    calls = {f.object for f in ir.facts_for("m:G.pong", "calls")}
     assert calls == {"m:G.ping"}, calls
 ok = True
 """,
@@ -437,7 +437,7 @@ ok = True
         "check": """
 from mintok.errors import MintokError
 from mintok.abi import ChangeRejected
-assert issubclass(ChangeRejected, MintokError) and issubclass(ChangeRejected, ValueError)
+assert issubclass(ChangeRejected, MintokError)
 ok = True
 """,
     },

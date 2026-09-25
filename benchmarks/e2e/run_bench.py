@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -62,13 +63,37 @@ def check(root: Path, task_id: str, log: Path) -> None:
     )
     suite_ok = env_out.returncode == 0
 
-    scope: dict = {}
+    # Checkers are plain Python written against the task copy: they import
+    # mintok.*, may reference ``root``, and may spawn subprocesses. Run them
+    # with the copy's src first on sys.path (in-process and inherited), and
+    # with any main-repo mintok modules purged from the import cache.
+    scope: dict = {"root": str(root)}
+    saved_modules = {
+        k: v for k, v in sys.modules.items() if k == "mintok" or k.startswith("mintok.")
+    }
+    for k in saved_modules:
+        del sys.modules[k]
+    old_cwd = os.getcwd()
+    old_pp = os.environ.get("PYTHONPATH")
+    os.chdir(root)
+    os.environ["PYTHONPATH"] = str(root / "src")
+    sys.path.insert(0, str(root / "src"))
     try:
         code = compile(task["check"], f"<check:{task_id}>", "exec")
         exec(code, scope)  # noqa: S102 - benchmark checkers are first-party
         check_ok, detail = scope.get("ok", False), scope.get("detail", "")
-    except Exception as exc:  # noqa: BLE001 - reported, not raised
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - reported, not raised
         check_ok, detail = False, f"{type(exc).__name__}: {exc}"
+    finally:
+        os.chdir(old_cwd)
+        sys.path.remove(str(root / "src"))
+        if old_pp is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = old_pp
+        for k in [k for k in sys.modules if k == "mintok" or k.startswith("mintok.")]:
+            del sys.modules[k]
+        sys.modules.update(saved_modules)
 
     entries = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
     tool_output_tokens = sum(estimate_tokens(e.get("output", "")) for e in entries)
