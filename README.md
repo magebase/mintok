@@ -48,6 +48,12 @@ uv run mintok compile path/to/repo --out ir.json
 # Semantic diff: meaning-level changes, not line diffs
 uv run mintok diff path/to/old path/to/new
 
+# Relearn pack: only what agents must relearn between two versions
+uv run mintok relearn path/to/old path/to/new
+
+# Deterministic context-token benchmark vs a grep-and-paging baseline
+uv run mintok bench path/to/repo
+
 # Profile agent session records for avoidable inference spend (free)
 uv run mintok profile sessions.jsonl
 
@@ -64,7 +70,8 @@ The compiler is pure stdlib (`ast`) — no dependencies at runtime.
 Agents learn one compact interface over the semantic IR instead of dozens of
 verbose tools and raw source reads:
 
-- `query` — semantic facts: `symbol`, `effects`, `callers` (`slice` in the commercial build)
+- `query` — semantic facts: `symbol`, `effects`, `callers`, `find`, `writers`, `summary`
+  (`slice` in the commercial build)
 - `change` — replace one symbol's definition, with parse validation and interface-impact report
 - `verify` — run a check command, get pass/fail plus a compact output tail
 
@@ -75,6 +82,24 @@ An open, versioned, model-independent representation: symbols, signatures, effec
 (`body_hash` ignores formatting, comments, and docstrings; `interface_hash` covers
 signature + effects). A text change with an unchanged interface hash means an agent does
 not need to relearn the component.
+
+## Token minimization (deterministic, no model calls)
+
+The open layer eliminates frontier reads before any compression is needed:
+
+- **Rendering ladder** — `find` (one signature line per name match), `symbol` /
+  `effects` / `callers` / `writers` (signature + compact facts), `summary` (adds the
+  docstring summary line); raw source is the last resort.
+- **Relearn packs** — `mintok relearn old new` emits only symbols whose
+  `interface_hash` changed, rendered as compact facts. Body-only changes are
+  provably free to skip and are omitted by count.
+- **`mintok bench`** — deterministic context-token benchmark. For representative
+  questions (locate / understand / attribute callers / attribute writers / relearn),
+  it compares a competent grep-and-paging baseline (grep hit lines + sources of the
+  innermost matching definitions) against the ABI answers, using the pluggable
+  chars/4 estimator. On this repository it measures **~33× fewer context tokens**
+  (97%); the relearn task alone drops a one-line body-only edit from a full-file
+  re-read to an 18-token omission note.
 
 ## Development
 

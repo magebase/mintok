@@ -78,8 +78,41 @@ class AgentABI:
         """L1 rendering: signature plus effect facts, never the body."""
         sym = self._symbol(symbol_id)
         lines = [f"{sym.id} {sym.kind} {sym.signature}"]
-        lines += [_render_fact(f) for f in self.get_effects(symbol_id)]
+        lines += [render_fact(f) for f in self.get_effects(symbol_id)]
         return "\n".join(lines)
+
+    def find_symbols(self, pattern: str) -> list[Symbol]:
+        """L0: definitions matching a name pattern, one signature line each."""
+        needle = pattern.lower()
+        return sorted(
+            (s for s in self.ir.symbols.values() if needle in s.name.lower()),
+            key=lambda s: s.id,
+        )
+
+    def get_writers(self, attribute: str) -> list[Fact]:
+        """Reverse lookup over ``writes`` facts; no source paging needed."""
+        suffix = f".{attribute}"
+        return sorted(
+            (f for f in self.ir.facts if f.predicate == "writes" and (f.object.endswith(suffix))),
+            key=lambda f: f.subject,
+        )
+
+    def get_summary(self, symbol_id: str) -> str:
+        """L2 rendering: L1 plus the docstring summary line, still never the body."""
+        head = self.get_symbol(symbol_id)
+        doc = self._doc_summary(symbol_id)
+        return f"{head}\nsummary {doc}" if doc else head
+
+    def _doc_summary(self, symbol_id: str) -> str:
+        snippet = textwrap.dedent(self.source_of(symbol_id))
+        try:
+            tree = ast.parse(snippet)
+        except SyntaxError:
+            return ""
+        doc = ast.get_docstring(tree.body[0]) if tree.body else None
+        if not doc:
+            return ""
+        return doc.strip().splitlines()[0].strip()
 
     def get_effects(self, symbol_id: str) -> list[Fact]:
         self._symbol(symbol_id)
@@ -99,9 +132,15 @@ class AgentABI:
         if op == "symbol":
             return self.get_symbol(target)
         if op == "effects":
-            return "\n".join(_render_fact(f) for f in self.get_effects(target))
+            return "\n".join(render_fact(f) for f in self.get_effects(target))
         if op == "callers":
             return "\n".join(f"{f.subject} {f.confidence:.2f}" for f in self.get_callers(target))
+        if op == "find":
+            return "\n".join(f"{s.id} {s.signature}" for s in self.find_symbols(target))
+        if op == "writers":
+            return "\n".join(f"{f.subject} writes {f.object}" for f in self.get_writers(target))
+        if op == "summary":
+            return self.get_summary(target)
         if op == "slice":
             raise NotImplementedError(
                 "slicing is part of the commercial MinTok Inference Compiler; "
@@ -149,12 +188,6 @@ class AgentABI:
         proc = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=timeout)
         output = (proc.stdout + proc.stderr).rstrip().splitlines()
         return VerifyResult(proc.returncode == 0, proc.returncode, "\n".join(output[-tail_lines:]))
-
-
-def _render_fact(fact: Fact) -> str:
-    if fact.predicate == "calls":
-        return f"calls {fact.object} {fact.confidence:.2f}"
-    return f"{fact.predicate} {fact.object}"
 
 
 def tool_surface_tokens() -> int:

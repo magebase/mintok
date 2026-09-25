@@ -121,7 +121,9 @@ src/mintok/
   profiler.py         avoidable-spend profiler (published formulas; capped at total spend)
   benchmark.py        Agent Efficiency Benchmark runner, paired report, savings summary
   abi.py              Agent ABI + compact tool surface (query / change / verify)
-  cli.py              mintok compile | diff | slice (commercial) | --version
+  pack.py             relearn packs: only interface-hash changes, body-only skipped
+  bench.py            deterministic context-token benchmark vs grep-and-paging
+  cli.py              mintok compile | diff | relearn | bench | slice (commercial) | --version
 features/*.feature    Gherkin specs (@domain / @integration)
 tests/acceptance/     pytest-bdd step definitions
 ```

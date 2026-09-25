@@ -13,9 +13,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from mintok import __version__
+from mintok.bench import run_token_benchmark
 from mintok.benchmark import benchmark_report, savings_summary
 from mintok.compiler import compile_repository
-from mintok.diff import diff_ir, render_changes
+from mintok.diff import changes_to_dicts, diff_ir, render_changes
+from mintok.pack import build_relearn_pack
 from mintok.profiler import profile_sessions, render_profile
 from mintok.records import load_runs_jsonl, load_sessions_jsonl
 
@@ -44,6 +46,22 @@ def build_parser() -> argparse.ArgumentParser:
     diff_cmd.add_argument("new_root", type=Path)
     diff_cmd.add_argument("--format", choices=("text", "json"), default="text")
 
+    relearn = sub.add_parser(
+        "relearn", help="pack of what agents must relearn between two repository versions"
+    )
+    relearn.add_argument("old_root", type=Path)
+    relearn.add_argument("new_root", type=Path)
+    relearn.add_argument("--format", choices=("text", "json"), default="text")
+
+    bench = sub.add_parser(
+        "bench", help="deterministic context-token benchmark vs a grep-and-paging baseline"
+    )
+    bench.add_argument("root", type=Path)
+    bench.add_argument(
+        "--vs", type=Path, help="second repository root; adds a relearn task between the two"
+    )
+    bench.add_argument("--format", choices=("text", "json"), default="text")
+
     prof = sub.add_parser("profile", help="profile agent session records for avoidable inference spend")
     prof.add_argument("sessions", type=Path)
 
@@ -66,6 +84,31 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps([asdict(c) for c in changes], indent=2))
         else:
             print(render_changes(changes))
+        return 0
+
+    if args.command == "relearn":
+        old_ir = compile_repository(args.old_root)
+        new_ir = compile_repository(args.new_root)
+        pack = build_relearn_pack(old_ir, new_ir)
+        if args.format == "json":
+            print(
+                json.dumps(
+                    {
+                        "changes": changes_to_dicts(list(pack.changes)),
+                        "renderings": pack.renderings,
+                        "omitted_body_only": pack.omitted_body_only,
+                        "rendered": pack.render(),
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(pack.render())
+        return 0
+
+    if args.command == "bench":
+        report = run_token_benchmark(args.root, vs=args.vs)
+        print(report.to_json() if args.format == "json" else report.render_text())
         return 0
 
     if args.command == "profile":
