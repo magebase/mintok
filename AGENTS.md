@@ -116,7 +116,10 @@ src/mintok/
   compiler/python.py  Python AST → IR (symbols, calls, raises, attribute writes)
   cache.py            hash-invalidated fact cache
   diff.py             semantic diff between two compiled repositories
-  metrics.py          run records, accepted-changes/$, paired bootstrap, oracle verdict
+  metrics.py          run records, accepted-changes/$, paired bootstrap, oracle verdict, OCU metering
+  records.py          open JSONL record formats (agent sessions, benchmark runs)
+  profiler.py         avoidable-spend profiler (published formulas; capped at total spend)
+  benchmark.py        Agent Efficiency Benchmark runner, paired report, savings summary
   abi.py              Agent ABI + compact tool surface (query / change / verify)
   cli.py              mintok compile | diff | slice (commercial) | --version
 features/*.feature    Gherkin specs (@domain / @integration)

@@ -113,3 +113,13 @@ def oracle_verdict(headroom: float, kill_below: float = 2.0, continue_at: float 
     if headroom < continue_at:
         return "INVESTIGATE"
     return "CONTINUE"
+
+
+# Cost-accounting spec: $0.01 of blended cost per Optimization Compute Unit.
+# A pure, published transformation of measured cost — never a token markup.
+OCU_USD = 0.01
+
+
+def optimization_compute_units(total_usd: float) -> float:
+    """Meter blended cost into Optimization Compute Units (OCU)."""
+    return total_usd / OCU_USD

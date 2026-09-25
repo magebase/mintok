@@ -27,8 +27,8 @@ the commercial **MinTok Inference Compiler** and is not published here.
 | Basic language parsers (Python) | Semantic cache optimizer |
 | Semantic diff | Model-specific context backends |
 | Hash-invalidated fact cache | Model routing engine |
-| Cost-accounting methodology + benchmark toolkit | Transformation memory / learned policies |
-|  | Enterprise distributed indexing |
+| Cost-accounting methodology (OCU metering) | Transformation memory / learned policies |
+| Agent Efficiency Benchmark runner + profiler | Enterprise distributed indexing |
 
 The open protocol reserves the `slice` operation and the full context-planning surface
 for the commercial build; the reference implementation here is complete enough to
@@ -47,6 +47,12 @@ uv run mintok compile path/to/repo --out ir.json
 
 # Semantic diff: meaning-level changes, not line diffs
 uv run mintok diff path/to/old path/to/new
+
+# Profile agent session records for avoidable inference spend (free)
+uv run mintok profile sessions.jsonl
+
+# Compare two benchmark arms: cache-aware $/solved, work/$, raw traces published
+uv run mintok benchmark baseline.jsonl optimizer.jsonl
 
 uv run mintok --version
 ```
