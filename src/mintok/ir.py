@@ -9,6 +9,9 @@ from typing import Iterable
 
 IR_VERSION = "1"
 
+# Predicates that describe a symbol's effects; rendered compactly for agents.
+EFFECT_PREDICATES = ("calls", "raises", "writes")
+
 
 def stable_hash(*parts: str) -> str:
     digest = hashlib.sha256()
@@ -32,6 +35,13 @@ class Fact:
     object: str
     confidence: float = 1.0
     provenance: str = "python-ast"
+
+
+def render_fact(fact: Fact) -> str:
+    """One compact line per fact: the agent-readable form of derived knowledge."""
+    if fact.predicate == "calls":
+        return f"calls {fact.object} {fact.confidence:.2f}"
+    return f"{fact.predicate} {fact.object}"
 
 
 @dataclass(frozen=True, slots=True)

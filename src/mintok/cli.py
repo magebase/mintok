@@ -13,8 +13,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from mintok import __version__
+from mintok.benchmark import benchmark_report, savings_summary
 from mintok.compiler import compile_repository
 from mintok.diff import diff_ir, render_changes
+from mintok.profiler import profile_sessions, render_profile
+from mintok.records import load_runs_jsonl, load_sessions_jsonl
 
 SLICE_UPSELL = (
     "slicing is part of the commercial MinTok Inference Compiler; "
@@ -40,6 +43,13 @@ def build_parser() -> argparse.ArgumentParser:
     diff_cmd.add_argument("old_root", type=Path)
     diff_cmd.add_argument("new_root", type=Path)
     diff_cmd.add_argument("--format", choices=("text", "json"), default="text")
+
+    prof = sub.add_parser("profile", help="profile agent session records for avoidable inference spend")
+    prof.add_argument("sessions", type=Path)
+
+    bench = sub.add_parser("benchmark", help="compare baseline and optimizer run-record JSONL files")
+    bench.add_argument("baseline", type=Path)
+    bench.add_argument("optimizer", type=Path)
     return parser
 
 
@@ -56,6 +66,17 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps([asdict(c) for c in changes], indent=2))
         else:
             print(render_changes(changes))
+        return 0
+
+    if args.command == "profile":
+        print(render_profile(profile_sessions(load_sessions_jsonl(args.sessions))))
+        return 0
+
+    if args.command == "benchmark":
+        records = [*load_runs_jsonl(args.baseline), *load_runs_jsonl(args.optimizer)]
+        print(benchmark_report(records).render())
+        print()
+        print(savings_summary(records).render())
         return 0
 
     ir = compile_repository(args.root)

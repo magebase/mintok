@@ -10,18 +10,21 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mintok.compiler import compile_repository
-from mintok.ir import Fact, ProgramIR, Symbol
+from mintok.ir import EFFECT_PREDICATES, Fact, ProgramIR, Symbol, render_fact
 from mintok.tokens import estimate_tokens
 
 # The open protocol reserves the ``slice`` query op for the commercial MinTok
-# Inference Compiler; the open reference build implements symbol|effects|callers.
-OPEN_QUERY_OPS = ("symbol", "effects", "callers")
+# Inference Compiler; the open reference build implements the deterministic ops below.
+OPEN_QUERY_OPS = ("symbol", "effects", "callers", "find", "writers", "summary")
 
 TOOL_SURFACE: list[dict] = [
     {
         "name": "query",
-        "description": "Read semantic facts. op: symbol|effects|callers (slice: commercial build)",
-        "params": {"op": "str", "target": "symbol id module:Qual.name"},
+        "description": (
+            "Read semantic facts. op: symbol|effects|callers|find|writers|summary"
+            " (slice: commercial build)"
+        ),
+        "params": {"op": "str", "target": "symbol id | name pattern | attribute"},
     },
     {
         "name": "change",
@@ -35,7 +38,8 @@ TOOL_SURFACE: list[dict] = [
     },
 ]
 
-EFFECT_PREDICATES = ("calls", "raises", "writes")
+# ``EFFECT_PREDICATES`` is imported from mintok.ir above and re-exported here
+# so existing consumers of ``mintok.abi.EFFECT_PREDICATES`` keep working.
 
 
 def tool_surface_json() -> str:
