@@ -95,11 +95,26 @@ The open layer eliminates frontier reads before any compression is needed:
   provably free to skip and are omitted by count.
 - **`mintok bench`** — deterministic context-token benchmark. For representative
   questions (locate / understand / attribute callers / attribute writers / relearn),
-  it compares a competent grep-and-paging baseline (grep hit lines + sources of the
-  innermost matching definitions) against the ABI answers, using the pluggable
-  chars/4 estimator. On this repository it measures **~33× fewer context tokens**
-  (97%); the relearn task alone drops a one-line body-only edit from a full-file
-  re-read to an 18-token omission note.
+  it pairs each question against **two baselines** — a raw grep-and-paging agent
+  (hit lines + innermost definition sources) and a strong tooling baseline without
+  semantic facts (outline views, rg hits with enclosing signatures, unified diffs,
+  bodies for semantics) — using the pluggable chars/4 estimator.
+
+On this repository (11 repository-query tasks, no model calls):
+
+> **6.1× less repository context than a strong tooling baseline (4,142 → 674 tokens)
+> and 38.4× less than a grep-and-paging baseline (25,853 → 674 tokens), across symbol
+> lookup, semantics, caller and writer queries — including the 112-token agent ABI.**
+>
+> On a body-only source modification whose public interface was unchanged, semantic
+> hashing reduced relearning context from 1,914 → 18 tokens (106×) against whole-file
+> re-reads, and from a 103-token unified diff to 18 tokens (5.7×) with a
+> machine-checkable no-relearning guarantee the diff cannot offer.
+>
+> End-to-end coding-agent efficiency benchmarks are next.
+
+These are repository-information workloads, not full agent trajectories: they bound
+one component of the accepted-changes-per-dollar objective, not the whole claim.
 
 ## Development
 

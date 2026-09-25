@@ -50,6 +50,7 @@ Feature: Context-token benchmark
     And the benchmark JSON reports baseline tokens above treatment tokens
     And every benchmark task costs fewer treatment tokens than baseline tokens
     And the benchmark JSON reports a reduction ratio of at least "1.5"
+    And the benchmark JSON reports a strong-tooling reduction ratio of at least "1.0"
 
   @integration
   Scenario: The text report states the reduction

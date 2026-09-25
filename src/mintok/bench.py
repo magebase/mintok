@@ -1,18 +1,30 @@
-"""Deterministic context-token benchmark: grep-and-paging vs the mintok ABI.
+"""Deterministic context-token benchmark: two baselines vs the mintok ABI.
 
 Unlike mintok.benchmark (which compares run records from real agent arms), this
 harness needs no model calls at all. For a fixed set of representative agent
-questions, both arms construct the context needed to answer them and the tokens
-are estimated with the project's pluggable estimator (chars/4). The baseline arm
-models a competent grep-and-paging agent: it ingests grep hit lines plus the
-source of every definition containing a hit, because hit lines alone carry no
-semantics. The treatment arm ingests only the corresponding ABI answer. Subject
-selection, hit matching, and ordering are all deterministic; the harness is
-paired per task.
+questions, each arm constructs the context needed to answer them and tokens are
+estimated with the project's pluggable estimator (chars/4). Two baselines are
+reported:
+
+- **raw** — a competent grep-and-paging agent: hit lines plus the source of
+  every innermost definition containing a hit (hit lines alone carry no
+  semantics).
+- **strong** — modern tooling without semantic facts: an outline/symbols view
+  for lookups (matching def lines), ripgrep hits plus enclosing signature lines
+  for attribution, the body itself for semantics (no textual tool can enumerate
+  raises/calls without it), and a unified diff for relearning. The strong
+  baseline is cheaper but unsound: it cannot tell calls from mentions or prove
+  an interface unchanged.
+
+The treatment arm ingests only the corresponding ABI answer. Subject selection,
+hit matching, and ordering are all deterministic; the harness is paired per
+task. Request/retry overheads, reasoning tokens, and index construction are
+trajectory-level costs and are intentionally not modeled here.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -26,10 +38,14 @@ from mintok.pack import build_relearn_pack
 from mintok.tokens import estimate_tokens
 
 NOTES = (
-    "estimated tokens (chars/4), no model calls; baseline models a competent "
-    "grep-and-paging agent (hit lines + sources of hit-containing definitions); "
-    "treatment pays the ABI tool surface once per session, baseline tool "
-    "schemas are not modeled (conservative toward mintok)"
+    "estimated tokens (chars/4), no model calls; raw baseline models a "
+    "competent grep-and-paging agent (hit lines + sources of innermost "
+    "hit-containing definitions); strong baseline models modern tooling "
+    "without semantic facts (outline views, rg hits + enclosing signatures, "
+    "unified diff for relearn); treatment pays the ABI tool surface once per "
+    "session, baseline tool schemas are not modeled (conservative toward "
+    "mintok); trajectory costs (requests, retries, reasoning, indexing) are "
+    "not modeled"
 )
 
 
@@ -39,6 +55,7 @@ class TaskResult:
     task_class: str
     baseline_tokens: int
     treatment_tokens: int
+    strong_tokens: int = 0
 
 
 @dataclass(slots=True)
@@ -55,10 +72,20 @@ class BenchReport:
         return sum(t.treatment_tokens for t in self.tasks) + self.fixed_tool_surface_tokens
 
     @property
+    def strong_total(self) -> int:
+        return sum(t.strong_tokens for t in self.tasks)
+
+    @property
     def reduction_ratio(self) -> float:
         if self.treatment_total == 0:
             return float("inf")
         return self.baseline_total / self.treatment_total
+
+    @property
+    def strong_reduction_ratio(self) -> float:
+        if self.treatment_total == 0:
+            return float("inf")
+        return self.strong_total / self.treatment_total
 
     @property
     def saved_pct(self) -> float:
@@ -69,9 +96,11 @@ class BenchReport:
     def to_dict(self) -> dict:
         return {
             "baseline_tokens": self.baseline_total,
+            "strong_tokens": self.strong_total,
             "treatment_tokens": self.treatment_total,
             "fixed_tool_surface_tokens": self.fixed_tool_surface_tokens,
             "reduction_ratio": round(self.reduction_ratio, 2),
+            "strong_reduction_ratio": round(self.strong_reduction_ratio, 2),
             "tokens_saved_pct": round(self.saved_pct, 1),
             "notes": NOTES,
             "tasks": [asdict(t) for t in self.tasks],
@@ -83,14 +112,18 @@ class BenchReport:
     def render_text(self) -> str:
         width = max((len(t.task_id) for t in self.tasks), default=10)
         lines = [
-            f"{'task':<{width}}  {'class':<9}  {'baseline':>8}  {'mintok':>7}",
+            f"{'task':<{width}}  {'class':<9}  {'baseline':>8}  {'strong':>7}  {'mintok':>7}",
             *(
                 f"{t.task_id:<{width}}  {t.task_class:<9}  {t.baseline_tokens:>8}  "
-                f"{t.treatment_tokens:>7}"
+                f"{t.strong_tokens:>7}  {t.treatment_tokens:>7}"
                 for t in self.tasks
             ),
-            f"{'total':<{width}}  {'':<9}  {self.baseline_total:>8}  {self.treatment_total:>7}",
-            f"token reduction: {self.reduction_ratio:.1f}x ({self.saved_pct:.1f}% fewer context tokens)",
+            (
+                f"{'total':<{width}}  {'':<9}  {self.baseline_total:>8}  "
+                f"{self.strong_total:>7}  {self.treatment_total:>7}"
+            ),
+            f"token reduction vs grep-and-paging: {self.reduction_ratio:.1f}x ({self.saved_pct:.1f}% fewer context tokens)",
+            f"token reduction vs strong tooling: {self.strong_reduction_ratio:.1f}x",
         ]
         return "\n".join(lines)
 
@@ -149,6 +182,58 @@ class _SourceIndex:
     def source_tokens(self, symbols: list[Symbol]) -> int:
         return sum(estimate_tokens(self.symbol_source(s)) for s in symbols)
 
+    def _innermost(self, path: str, lineno: int) -> Symbol | None:
+        best: Symbol | None = None
+        for sym in self.ir.symbols.values():
+            if (
+                sym.source.path == path
+                and sym.source.start_line <= lineno <= sym.source.end_line
+                and (best is None or sym.source.start_line > best.source.start_line)
+            ):
+                best = sym
+        return best
+
+    def strong_find_tokens(self, name: str) -> int:
+        """Outline/symbols view: one ``path:line:def`` line per matching def."""
+        out: list[str] = []
+        for path, lines in sorted(self.lines.items()):
+            for i, line in enumerate(lines):
+                stripped = line.lstrip()
+                if stripped.startswith(("def ", "async def ")) and name in line:
+                    out.append(f"{path}:{i + 1}:{line.strip()}")
+        return estimate_tokens("\n".join(out))
+
+    def strong_hits_tokens(self, needle: str) -> int:
+        """Ripgrep hits plus enclosing signature lines (breadcrumb attribution)."""
+        out: list[str] = []
+        seen_defs: set[tuple[str, int]] = set()
+        for path, lines in sorted(self.lines.items()):
+            for i, line in enumerate(lines):
+                if needle not in line:
+                    continue
+                out.append(f"{path}:{i + 1}:{line.strip()}")
+                sym = self._innermost(path, i + 1)
+                if sym and sym.source.start_line != i + 1 and (path, sym.source.start_line) not in seen_defs:
+                    seen_defs.add((path, sym.source.start_line))
+                    out.append(
+                        f"{path}:{sym.source.start_line}:"
+                        f"{lines[sym.source.start_line - 1].strip()}"
+                    )
+        return estimate_tokens("\n".join(out))
+
+    def strong_diff_tokens(self, old_view: "_SourceIndex", paths: list[str]) -> int:
+        """Unified-diff view of the changed files (modern textual relearn)."""
+        out: list[str] = []
+        for path in paths:
+            old_lines = old_view.lines.get(path, [])
+            new_lines = self.lines.get(path, [])
+            out += list(
+                difflib.unified_diff(
+                    old_lines, new_lines, fromfile=f"old/{path}", tofile=f"new/{path}", lineterm=""
+                )
+            )
+        return estimate_tokens("\n".join(out))
+
 
 def _short_name(name: str) -> str:
     return name.rsplit(".", 1)[-1]
@@ -187,6 +272,7 @@ def run_token_benchmark(
                 task_id=f"find:{name}",
                 task_class="find",
                 baseline_tokens=view.grep_tokens(name) + view.source_tokens(matched),
+                strong_tokens=view.strong_find_tokens(name),
                 treatment_tokens=estimate_tokens(abi.query("find", name)),
             )
         )
@@ -199,6 +285,8 @@ def run_token_benchmark(
                 task_id=f"semantics:{sym.id}",
                 task_class="semantics",
                 baseline_tokens=estimate_tokens(view.symbol_source(sym)) + view.source_tokens(callees),
+                # No textual tool can enumerate raises/calls without the body.
+                strong_tokens=estimate_tokens(view.symbol_source(sym)),
                 treatment_tokens=estimate_tokens(abi.query("summary", sym.id)),
             )
         )
@@ -212,6 +300,7 @@ def run_token_benchmark(
                 task_id=f"callers:{sym.id}",
                 task_class="callers",
                 baseline_tokens=view.grep_tokens(short) + view.source_tokens(containing),
+                strong_tokens=view.strong_hits_tokens(short),
                 treatment_tokens=estimate_tokens(abi.query("callers", sym.id)),
             )
         )
@@ -224,6 +313,7 @@ def run_token_benchmark(
                 task_id=f"writers:{attribute}",
                 task_class="writers",
                 baseline_tokens=view.grep_tokens(needle) + view.source_tokens(view.symbols_whose_source_contains(needle)),
+                strong_tokens=view.strong_hits_tokens(needle),
                 treatment_tokens=estimate_tokens(abi.query("writers", attribute)),
             )
         )
@@ -248,12 +338,14 @@ def run_token_benchmark(
             for path in sorted(changed_files)
             if path in old_view.lines
         )
+        strong = old_view.strong_diff_tokens(view, sorted(changed_files))
         pack = build_relearn_pack(old_ir, ir)
         report.tasks.append(
             TaskResult(
                 task_id="relearn",
                 task_class="relearn",
                 baseline_tokens=baseline,
+                strong_tokens=strong,
                 treatment_tokens=estimate_tokens(pack.render()),
             )
         )

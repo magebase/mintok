@@ -62,6 +62,11 @@ def bench_ratio(ctx: SimpleNamespace, minimum: str) -> None:
     assert ctx.bench["reduction_ratio"] >= float(minimum), ctx.bench["reduction_ratio"]
 
 
+@then(parsers.parse('the benchmark JSON reports a strong-tooling reduction ratio of at least "{minimum}"'))
+def bench_strong_ratio(ctx: SimpleNamespace, minimum: str) -> None:
+    assert ctx.bench["strong_reduction_ratio"] >= float(minimum), ctx.bench["strong_reduction_ratio"]
+
+
 @then(parsers.parse('the benchmark JSON includes a "{task_class}" task'))
 def bench_task_class(ctx: SimpleNamespace, task_class: str) -> None:
     assert any(t["task_class"] == task_class for t in ctx.bench["tasks"]), ctx.bench["tasks"]

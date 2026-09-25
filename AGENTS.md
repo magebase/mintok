@@ -66,12 +66,17 @@ here will be declined. High-level thesis statements are fine; recipes are not.
 - **Agent ABI**: one compact interface (`query` / `change` / `verify`). Tool schemas are
   context; keep the surface tiny and measure its token cost. The protocol reserves the
   `slice` op for the commercial build; the open reference build reports that clearly.
+  Hard constraint: the frontier-facing surface stays within ~100–300 tokens (pinned by
+  a scenario); complexity goes behind the ABI, never into more exposed tools.
 - **Cache verifiable facts, not summaries.** Facts carry the source hash they were
   derived from and are invalidated by dependency tracking. Never store AI-written prose
   as truth.
 - **Two hashes per symbol**: `body_hash` (normalized AST; ignores formatting, comments,
   docstrings) and `interface_hash` (signature + effects + calls). Text change with
-  unchanged interface hash ⇒ the agent need not relearn the component.
+  unchanged interface hash ⇒ the agent need not relearn the component. Invalidation
+  correctness is a first-class technical problem: the hash contract (which edit classes
+  invalidate and which must not) is pinned scenario-by-scenario in
+  `features/hash_invalidation.feature`.
 - The compiler/IR stays dependency-free (stdlib `ast`); add a dependency only with a
   measured benchmark reason.
 
