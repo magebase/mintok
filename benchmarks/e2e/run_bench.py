@@ -106,8 +106,14 @@ def prepare(dest: Path, task_id: str | None = None) -> None:
     print(dest)
 
 
-def check(root: Path, task_id: str, log: Path) -> None:
-    task = task_by_id(task_id)
+def check_task(root: Path, task_id: str, checker_src: str, log: Path) -> dict:
+    """Suite + checker against one task copy; checker in a fresh subprocess.
+
+    The checker MUST NOT run in-process: a checker that imports fixture
+    modules (``biglib`` etc.) poisons ``sys.modules`` for every later
+    check, silently validating task 1's repo state forever after. A
+    subprocess makes cross-task cache pollution impossible.
+    """
     env_out = subprocess.run(
         [str(VENV_PY), "-m", "pytest", "-q"],
         cwd=root,
@@ -118,39 +124,22 @@ def check(root: Path, task_id: str, log: Path) -> None:
     )
     suite_ok = env_out.returncode == 0
 
-    # Checkers are plain Python written against the task copy: they import
-    # mintok.*, may reference ``root``, and may spawn subprocesses. Run them
-    # with the copy's src first on sys.path (in-process and inherited), and
-    # with any main-repo mintok modules purged from the import cache.
-    scope: dict = {"root": str(root)}
-    saved_modules = {
-        k: v for k, v in sys.modules.items() if k == "mintok" or k.startswith("mintok.")
-    }
-    for k in saved_modules:
-        del sys.modules[k]
-    old_cwd = os.getcwd()
-    old_pp = os.environ.get("PYTHONPATH")
-    os.chdir(root)
-    os.environ["PYTHONPATH"] = str(root / "src")
-    sys.path.insert(0, str(root / "src"))
-    try:
-        code = compile(task["check"], f"<check:{task_id}>", "exec")
-        exec(code, scope)  # noqa: S102 - benchmark checkers are first-party
-        check_ok, detail = scope.get("ok", False), scope.get("detail", "")
-    except (Exception, SystemExit) as exc:  # noqa: BLE001 - reported, not raised
-        check_ok, detail = False, f"{type(exc).__name__}: {exc}"
-    finally:
-        os.chdir(old_cwd)
-        sys.path.remove(str(root / "src"))
-        if old_pp is None:
-            os.environ.pop("PYTHONPATH", None)
-        else:
-            os.environ["PYTHONPATH"] = old_pp
-        for k in [k for k in sys.modules if k == "mintok" or k.startswith("mintok.")]:
-            del sys.modules[k]
-        sys.modules.update(saved_modules)
+    check_env = dict(os.environ)
+    check_env["PYTHONPATH"] = str(root / "src")
+    check_out = subprocess.run(
+        [sys.executable, "-c", f"root = {str(root)!r}\n" + checker_src],
+        cwd=root,
+        env=check_env,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    check_ok = check_out.returncode == 0
+    err_text = (check_out.stderr or check_out.stdout).strip()
+    detail = "" if check_ok else (err_text.splitlines()[-1] if err_text else "checker failed")
 
     entries = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
+    task = task_by_id(task_id) if task_id in {t["id"] for t in json.loads(TASKS_JSON.read_text())} else {"instruction": ""}
     tool_output_tokens = sum(estimate_tokens(e.get("output", "")) for e in entries)
     tool_input_tokens = sum(estimate_tokens(json.dumps(e.get("args", ""))) for e in entries)
     latency = (entries[-1]["ts"] - entries[0]["ts"]) if len(entries) > 1 else 0.0
@@ -170,6 +159,12 @@ def check(root: Path, task_id: str, log: Path) -> None:
     out = log.parent / f"{log.stem}.score.json"
     out.write_text(json.dumps(score, indent=2))
     print(json.dumps({k: score[k] for k in ("task_id", "suite_ok", "check_ok", "detail", "turns")}))
+    return score
+
+
+def check(root: Path, task_id: str, log: Path) -> None:
+    """Score one task copy with its frozen checker (subprocess-isolated)."""
+    check_task(root, task_id, task_by_id(task_id)["check"], log)
 
 
 def record(arm: str, task_id: str, log: Path) -> None:

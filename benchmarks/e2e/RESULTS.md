@@ -646,29 +646,41 @@ and was archived (`/home/aqua/bench-run/nemotron-pilot/`), then the run
 was repeated on a stronger one — the two-model pattern is itself
 evidence for the structural-transfer thesis.
 
+**Benchmark-corrupting checker bug found and fixed.** The first scoring
+pass showed 1/15 vs 1/15 with mass suite-green/checker-red — impossible,
+since task 03's final file state provably passed its checker. Root cause:
+`check()` ran checker code in-process; checkers import fixture modules
+(`biglib`), and only `mintok.*` was purged from `sys.modules`, so every
+checker after task 01 validated **task 01's repo state**. The suite ran
+in a subprocess (clean) — hence the signature. Fix: checkers now run in
+a fresh subprocess (`check_task`), pinned by a scenario; all 30
+trajectories were re-scored offline from the on-disk task copies at zero
+model cost.
+
 | metric | control | slicer | delta |
 |---|---|---|---|
-| solved | 1/15 | 1/15 | 1.00x |
-| input tokens, total | ~133,600 | 84,893 | **4.7x less** |
-| input tokens, median/task | 13,575 | 1,683 | **8.1x less** |
-| cache reads (slicer) | — | 409,811 | |
-| output tokens (slicer) | — | 37,710 | |
-| turns/task | 10.7 | 10.0 | 0.94x |
-| slice acceptance / fallback / expanded | — | 0.00 / 0.07 / 0.13 | |
+| solved (corrected) | **15/15** | **13/15** | 0.87x |
+| tool-context+prompt / solved | 8,908 | 1,801 | **4.9x less** |
+| provider tok / solved (median) | 34,816 | 10,627 | 3.3x less |
+| turns / solved | 10.7 | 9.8 | 0.92x |
+| expanded slices | — | 13% | |
+| raw fallback rate | — | 7% | |
 
-**VERDICT: REJECT** (pre-registered bar: solve ≥ 15/15). Per the
-decision rule, no paid Stage-2 frontier calibration yet.
+**VERDICT: REJECT** (pre-registered bar: solve ≥ control's 15/15; a
+solve-rate regression kills the arm regardless of tokens). The two
+slicer-only failures: `biglib-large-06` (left the suite red after a
+10-patch loop; control solved it) and `biglib-large-14` (suite green,
+checker red: the patch dropped the `RenderOutput.join` method — a
+checker_disagreement case, correctly not called stochastic).
 
 What the data says:
 
-- **Structural savings transferred.** A second, unrelated model shows
-  the same ~5–8x provider-token gap at equal solve rate. The savings
-  live in the software representation, not the model.
-- **Behavioral savings did not.** Failure attribution is dominated by
-  `fallback_needed`: after the slice, this model reads past it and then
-  patches blind in loops (worst: 17 patches + 12 reads, suite never run,
-  151k provider tokens on one task). One `checker_disagreement`
-  (suite green, checker red — correctly not labeled stochastic).
+- **Structural savings transferred hard.** Same solve work at ~5x less
+  context on a second, unrelated model class. The savings live in the
+  software representation, not the model.
+- **Behavioral savings did not.** The failing trajectories are patch
+  loops without verification (worst: 17 patches, 12 reads, suite never
+  run; 151k provider tokens on one task).
 - **Diagnosis queue** (before any rerun): (1) verify-then-stop
   discipline in the loop driver — a trajectory that never runs `suite`
   should be steered back, not cut off at the turn cap; (2) the 13%
@@ -679,4 +691,4 @@ What the data says:
 
 The $-denominated claim remains blocked on a nonzero-priced model (both
 arms $0.00 here); provider tokens/solved is the Stage-1 headline by
-pre-decision.
+pre-decision. A paid Stage-2 run awaits the user's call.

@@ -122,6 +122,13 @@ Feature: Experiment funnel
     When the comparison is planned
     Then the run demands fresh control trajectories
 
+  Scenario: A checker validates its own task copy, never a cached one
+    Given two task copies checked in sequence, both defining module "biglib"
+    And the first copy's module state satisfies only the first checker
+    When each copy's checker runs after its trajectory
+    Then the second checker sees the second copy's module state
+    And a checker that passes is recorded as solved regardless of position
+
   Scenario Outline: Failures are attributed by their evidence
     Given a failed slicer run where target_in_slice is <target>, slice_dominated is <dominated>, slice_truncated is <truncated>, edit_rejections is <rejects>, and suite_ok is <suite>
     Then the failure class is "<klass>"

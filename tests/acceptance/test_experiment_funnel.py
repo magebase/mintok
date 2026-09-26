@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -361,3 +362,58 @@ def failed_run_flags(ctx: SimpleNamespace, target: str, dominated: str, truncate
 @then(parsers.parse('the failure class is "{klass}"'))
 def failure_class_is(ctx: SimpleNamespace, klass: str) -> None:
     assert attribute_failure(**ctx.failure_flags) == klass
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@given('two task copies checked in sequence, both defining module "biglib"')
+def two_copies(ctx: SimpleNamespace, tmp_path) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "mintok_bench_run_bench", _REPO_ROOT / "benchmarks" / "e2e" / "run_bench.py"
+    )
+    assert spec is not None and spec.loader is not None
+    ctx.run_bench = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ctx.run_bench)
+
+    def make_copy(name: str, value: str):
+        root = tmp_path / name
+        (root / "src" / "biglib").mkdir(parents=True)
+        (root / "src" / "biglib" / "__init__.py").write_text("")
+        (root / "src" / "biglib" / "val.py").write_text(f"VALUE = {value!r}\n")
+        tdir = root / "tests"
+        tdir.mkdir()
+        (tdir / "test_ok.py").write_text("def test_ok():\n    assert True\n")
+        log = root / "run.jsonl"
+        log.write_text("")  # empty trajectory: check still must run
+        return root, log
+
+    # first copy's module state satisfies only the first checker
+    ctx.copy_a, ctx.log_a = make_copy("copy-a", "one")
+    ctx.copy_b, ctx.log_b = make_copy("copy-b", "two")
+    ctx.checker_a = "import sys\nfrom biglib.val import VALUE\nassert VALUE == 'one'\n"
+    ctx.checker_b = "import sys\nfrom biglib.val import VALUE\nassert VALUE == 'two'\n"
+
+
+@given("the first copy's module state satisfies only the first checker")
+def first_copy_satisfies_first_only(ctx: SimpleNamespace) -> None:
+    assert "one" in (ctx.copy_a / "src" / "biglib" / "val.py").read_text()
+    assert "two" in (ctx.copy_b / "src" / "biglib" / "val.py").read_text()
+
+
+@when("each copy's checker runs after its trajectory")
+def run_both_checkers(ctx: SimpleNamespace) -> None:
+    ctx.score_a = ctx.run_bench.check_task(ctx.copy_a, "iso-a", ctx.checker_a, ctx.log_a)
+    ctx.score_b = ctx.run_bench.check_task(ctx.copy_b, "iso-b", ctx.checker_b, ctx.log_b)
+
+
+@then("the second checker sees the second copy's module state")
+def second_checker_sees_own_copy(ctx: SimpleNamespace) -> None:
+    assert ctx.score_b["check_ok"] is True, ctx.score_b["detail"]
+
+
+@then("a checker that passes is recorded as solved regardless of position")
+def pass_is_solved_at_any_position(ctx: SimpleNamespace) -> None:
+    assert ctx.score_b["solved"] is True

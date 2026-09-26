@@ -1,0 +1,15 @@
+{"task_id": "biglib-large-01", "arm": "slicer-large", "solved": true, "frontier_usd": 0, "input_tokens": 1027, "output_tokens": 60, "turns": 5, "latency_s": 20.8}
+{"task_id": "biglib-large-02", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 2047, "output_tokens": 159, "turns": 11, "latency_s": 21.2}
+{"task_id": "biglib-large-03", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 756, "output_tokens": 49, "turns": 4, "latency_s": 5.1}
+{"task_id": "biglib-large-04", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 755, "output_tokens": 50, "turns": 4, "latency_s": 6.7}
+{"task_id": "biglib-large-05", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 1211, "output_tokens": 68, "turns": 5, "latency_s": 17.6}
+{"task_id": "biglib-large-06", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 4643, "output_tokens": 308, "turns": 18, "latency_s": 81.3}
+{"task_id": "biglib-large-07", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 1241, "output_tokens": 62, "turns": 5, "latency_s": 19.1}
+{"task_id": "biglib-large-08", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 3036, "output_tokens": 575, "turns": 32, "latency_s": 72.4}
+{"task_id": "biglib-large-09", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 1683, "output_tokens": 77, "turns": 6, "latency_s": 12.6}
+{"task_id": "biglib-large-10", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 716, "output_tokens": 62, "turns": 4, "latency_s": 7.2}
+{"task_id": "biglib-large-11", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 5127, "output_tokens": 421, "turns": 25, "latency_s": 123.1}
+{"task_id": "biglib-large-12", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 1850, "output_tokens": 89, "turns": 6, "latency_s": 15.4}
+{"task_id": "biglib-large-13", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 1348, "output_tokens": 74, "turns": 6, "latency_s": 17.3}
+{"task_id": "biglib-large-14", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 2415, "output_tokens": 58, "turns": 4, "latency_s": 16.4}
+{"task_id": "biglib-large-15", "arm": "slicer-large", "solved": false, "frontier_usd": 0, "input_tokens": 2614, "output_tokens": 192, "turns": 15, "latency_s": 41.7}
