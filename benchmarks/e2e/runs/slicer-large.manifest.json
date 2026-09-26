@@ -1,7 +1,7 @@
 {
-  "provider": "anthropic",
-  "provider_api_version": "anthropic 2023-06-01",
-  "model": "mock/fake",
+  "provider": "openrouter",
+  "provider_api_version": "openrouter/v1 (provider-fixed)",
+  "model": "stealth/space-bunny-alpha",
   "reasoning_effort": "none",
   "temperature": "0.0",
   "top_p": "provider-default",
@@ -9,7 +9,7 @@
   "system_prompt_hash": "32182dcd8d2e494f",
   "agent_instruction_hash": "062102fbcafd1276",
   "toolset_hash": "adb3f8eebe8e44d7",
-  "harness_version": "e492b4e",
+  "harness_version": "d39d048",
   "task_set_hash": "c35f14258ef0c70b",
   "repo_snapshot_hashes": "biglib:1ef48d9f4056eaf64d12f5b5c2e020dd"
 }

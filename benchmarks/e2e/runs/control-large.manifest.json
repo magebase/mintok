@@ -9,7 +9,7 @@
   "system_prompt_hash": "fda769b40a6083b5",
   "agent_instruction_hash": "062102fbcafd1276",
   "toolset_hash": "e55d57e4d1ec141b",
-  "harness_version": "e281e97",
+  "harness_version": "d39d048",
   "task_set_hash": "c35f14258ef0c70b",
   "repo_snapshot_hashes": "biglib:1ef48d9f4056eaf64d12f5b5c2e020dd"
 }

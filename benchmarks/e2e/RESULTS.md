@@ -721,3 +721,34 @@ the apparatus for the fresh-holdout gate (slicer ≥ control solve rate,
 ≥2x provider-token reduction required / ≥3x strong, no catastrophic
 p95/max tails, healthy slice acceptance). Paid Stage-2 frontier
 calibration happens only after the fresh holdout passes.
+
+### Stage-1B outcome (same 15 tasks, same free model, fixes applied)
+
+| metric | control | slicer | delta |
+|---|---|---|---|
+| solved | 14/15 | 13/15 | 0.93x |
+| tool-context+prompt / solved | 9,116 | 1,830 | **5.0x less** |
+| turns / task | 11.7 | 12.5 | 1.07x |
+| raw fallback rate | — | 73% | |
+| expanded slices | — | 7% (was 13%) | |
+
+**VERDICT: REJECT.** The fixes changed neither the solve count nor the
+failure set: the slicer again fails exactly `biglib-large-06` (suite
+still red after a 35-turn loop — now attributed
+`agent_reasoning_failure`; the control arm solved it this time) and
+`biglib-large-14` (`bad_slice` again). Control itself dropped 15/15 →
+14/15 (task 15), consistent with the documented temperature-0 flip
+behavior of this provider — one more reason small deltas on this
+benchmark are noise. Member-method slicing did its job (expanded rate
+13% → 7%, packages tighter), but the raw-fallback share rose, meaning
+this model still reads past the slice when it stalls.
+
+**Stage-1B gates not met** → no fresh holdout yet, no paid Stage 2. The
+per-task bottleneck is two specific tasks, not a systemic regression:
+task 06 the model cannot finish even with 35 turns (control can, on
+some runs), and task 14 the model edits destructively (drops the
+`RenderOutput.join` method). Known report gaps to fix before the next
+run: the control-arm token rows read "—" in the live report (data is in
+the score sidecars; the table loader needs them wired), and the
+provider tok/solved row mis-sums (offline recompute from the usage
+sidecars is the source of truth).
