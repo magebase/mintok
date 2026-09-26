@@ -26,6 +26,24 @@ sys.path.insert(0, str(HARNESS_ROOT / "src"))
 from model_runner import run_turn  # noqa: E402
 
 AGENT_CLI = Path(__file__).resolve().parent / "agent_cli.py"
+
+
+def _empty_usage() -> dict:
+    return {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "cache_write_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0,
+        "latency_s": 0.0,
+    }
+
+
+def _add_usage(total: dict, usage) -> None:  # usage: UsageRecord | None
+    if usage is None:
+        return
+    for field_ in ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "reasoning_tokens"):
+        total[field_] += getattr(usage, field_, 0)
 MAX_TURNS = 25
 
 DISCIPLINE = {
@@ -152,15 +170,38 @@ def run_loop(
     completion=None,
     max_turns: int = MAX_TURNS,
 ) -> dict:
-    """Drive one agent to completion; returns a turn summary."""
+    """Drive one agent to completion; returns a turn and usage summary.
+
+    With the real model, per-call usage is accumulated (input, cached
+    input, cache writes, output, reasoning, latency) and written next to
+    the shim log as ``<stem>.usage.json`` — the billing telemetry the
+    record step prices into $/solved.
+    """
+    import os
+    import time
+
+    from mintok.billing import PriceTable, billing_row
+    from model_runner import parse_response
+
+    prices = PriceTable.load(os.environ.get("MINTOK_PRICE_OVERRIDES"))
+
     system = DISCIPLINE[policy]
     tools = TOOL_SCHEMAS[policy]
     messages: list[dict] = [{"role": "user", "content": instruction}]
     turns = 0
     completed = False
+    usage_total = _empty_usage()
+    per_turn: list[dict] = []
     for _ in range(max_turns):
-        turn_out = completion or run_turn
-        stop, blocks, usage = turn_out(model, system, messages, tools=tools)
+        started = time.monotonic()
+        if completion is not None:
+            stop, blocks, usage = completion(model, system, messages, tools=tools)
+        else:
+            stop, blocks, usage = run_turn(model, system, messages, tools=tools)
+        usage_total["latency_s"] += time.monotonic() - started
+        _add_usage(usage_total, usage)
+        if usage is not None:
+            per_turn.append(billing_row(log.stem, log.stem, turns, usage, prices.cost(model, usage)))
         turns += 1
         calls = [b for b in blocks if b.get("type") == "tool_use"]
         if not calls or stop != "tool_use":
@@ -179,7 +220,16 @@ def run_loop(
             )
         messages.append({"role": "assistant", "content": blocks})
         messages.append({"role": "user", "content": results})
-    return {"turns": turns, "completed": completed}
+    usage_total["turns"] = turns
+    usage_total["model"] = model
+    usage_total["usd"] = round(sum(row["cost_total_usd"] for row in per_turn), 6)
+    if completion is None:  # real runs only; fake completions bill nothing
+        log.parent.mkdir(parents=True, exist_ok=True)
+        (log.parent / f"{log.stem}.usage.json").write_text(json.dumps(usage_total, indent=2))
+        with (log.parent / f"{log.stem}.billing.jsonl").open("w") as fh:
+            for row in per_turn:
+                fh.write(json.dumps(row) + "\n")
+    return {"turns": turns, "completed": completed, "usage": usage_total}
 
 
 def main() -> int:

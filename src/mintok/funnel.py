@@ -57,8 +57,6 @@ class SlicerPromotion:
     turns_per_attempt: float
     p95_tokens: int
     max_tokens: int
-
-
 def slicer_promotion(
     runs: Iterable[SlicerRun],
     solve_target: int,
@@ -106,6 +104,93 @@ def slicer_promotion(
         p95_tokens=pct(0.95) if toks else 0,
         max_tokens=max(toks) if toks else 0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Control-manifest guard: reuse frozen controls only when nothing that could
+# change their behavior differs. Matching tasks and token conventions is not
+# enough — provider, model, reasoning effort, system prompt, toolset, harness
+# version, and task-set hashes all have to agree.
+# ---------------------------------------------------------------------------
+
+MANIFEST_FIELDS = (
+    "provider",
+    "model",
+    "reasoning_effort",
+    "system_prompt_hash",
+    "toolset_hash",
+    "harness_version",
+    "task_set_hash",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RunManifest:
+    provider: str
+    model: str
+    reasoning_effort: str
+    system_prompt_hash: str
+    toolset_hash: str
+    harness_version: str
+    task_set_hash: str
+
+    def to_json(self) -> str:
+        return json.dumps({f: getattr(self, f) for f in MANIFEST_FIELDS}, indent=2)
+
+    @classmethod
+    def from_json(cls, text: str) -> "RunManifest":
+        payload = json.loads(text)
+        return cls(**{f: payload[f] for f in MANIFEST_FIELDS if f in payload})
+
+
+def manifests_compatible(frozen: RunManifest | None, live: RunManifest) -> tuple[bool, list[str]]:
+    """(compatible, reasons). A missing frozen manifest is never compatible."""
+    if frozen is None:
+        return False, ["frozen control manifest missing; control provenance unknown"]
+    reasons = [
+        f"{field_}: frozen={getattr(frozen, field_)!r} live={getattr(live, field_)!r}"
+        for field_ in MANIFEST_FIELDS
+        if getattr(frozen, field_) != getattr(live, field_)
+    ]
+    return (not reasons), reasons
+
+
+# ---------------------------------------------------------------------------
+# Failure attribution: why did a slicer task fail?
+# ---------------------------------------------------------------------------
+
+#: decision order encodes the cheapest-to-verify evidence first.
+def attribute_failure(
+    *,
+    solved: bool,
+    target_in_slice: bool,
+    slice_dominated: bool,
+    slice_truncated: bool,
+    edit_rejections: int,
+    suite_ok: bool,
+) -> str:
+    """Classify one slicer-run failure from trajectory evidence.
+
+    Classes: ``bad_slice`` (the true working area was never in the package),
+    ``insufficient_slice`` (target present but content cut), ``fallback_needed``
+    (the agent had to leave the slice to make progress), ``edit_tool_limitation``
+    (the line-range patcher rejected the work), ``checker_stochastic`` (the
+    suite passed but the checker disagrees — flake or stochastic turn), and
+    ``agent_reasoning_failure`` (everything needed was available).
+    """
+    if solved:
+        return ""
+    if not target_in_slice:
+        return "bad_slice"
+    if slice_truncated:
+        return "insufficient_slice"
+    if not slice_dominated:
+        return "fallback_needed"
+    if edit_rejections > 0:
+        return "edit_tool_limitation"
+    if suite_ok:
+        return "checker_stochastic"
+    return "agent_reasoning_failure"
 
 # ---------------------------------------------------------------------------
 # FAST-8: the high-information smoke suite

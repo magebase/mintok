@@ -1,0 +1,9 @@
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-5",
+  "reasoning_effort": "none",
+  "system_prompt_hash": "32182dcd8d2e494f",
+  "toolset_hash": "adb3f8eebe8e44d7",
+  "harness_version": "841908c",
+  "task_set_hash": "042c4e5786e5efa6"
+}

@@ -106,3 +106,31 @@ Feature: Experiment funnel
       | t4   | yes    | 2500   | 8     | 300       | 2000         | no       |
     When the slicer promotion verdict is computed with solve target 4
     Then the verdict is "reject"
+
+  Scenario: A frozen control may only be reused under an identical manifest
+    Given a frozen control manifest with model "m1" and prompt hash "p1"
+    When a live slicer manifest arrives with model "m1" and prompt hash "p1"
+    Then the frozen control is compatible
+
+    Given a frozen control manifest with model "m1" and prompt hash "p1"
+    When a live slicer manifest arrives with model "m2" and prompt hash "p1"
+    Then the frozen control is refused with reason "model"
+    And the run demands fresh control trajectories
+
+  Scenario: A missing frozen manifest demands fresh control
+    Given no frozen control manifest exists
+    When the comparison is planned
+    Then the run demands fresh control trajectories
+
+  Scenario Outline: Failures are attributed by their evidence
+    Given a failed slicer run where target_in_slice is <target>, slice_dominated is <dominated>, slice_truncated is <truncated>, edit_rejections is <rejects>, and suite_ok is <suite>
+    Then the failure class is "<klass>"
+
+    Examples:
+      | target | dominated | truncated | rejects | suite | klass                 |
+      | no     | no        | no        | 0       | no    | bad_slice             |
+      | yes    | no        | yes       | 0       | no    | insufficient_slice    |
+      | yes    | no        | no        | 0       | no    | fallback_needed       |
+      | yes    | yes       | no        | 3       | no    | edit_tool_limitation  |
+      | yes    | yes       | no        | 0       | yes   | checker_stochastic    |
+      | yes    | yes       | no        | 0       | no    | agent_reasoning_failure |

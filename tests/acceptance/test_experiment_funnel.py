@@ -10,11 +10,14 @@ from mintok.funnel import (
     AdaptivePool,
     ControlCache,
     PairedOutcome,
+    RunManifest,
     SlicerRun,
     TaskIntegrityError,
+    attribute_failure,
     control_key,
     fast8_classes,
     fast8_suite,
+    manifests_compatible,
     next_phase,
     phase_suite,
     sequential_verdict,
@@ -286,3 +289,75 @@ def fallback_rate(ctx: SimpleNamespace, value: float) -> None:
 @then(parsers.parse("the expanded-slice rate is {value:f}"))
 def expanded_rate(ctx: SimpleNamespace, value: float) -> None:
     assert round(ctx.promotion.expanded_rate, 2) == value, ctx.promotion
+
+
+@given(parsers.parse('a frozen control manifest with model "{model}" and prompt hash "{prompt}"'))
+def frozen_manifest(ctx: SimpleNamespace, model: str, prompt: str) -> None:
+    ctx.frozen_manifest = RunManifest(
+        provider="anthropic", model=model, reasoning_effort="none",
+        system_prompt_hash=prompt, toolset_hash="t", harness_version="h",
+        task_set_hash="tasks",
+    )
+
+
+@when(parsers.parse('a live slicer manifest arrives with model "{model}" and prompt hash "{prompt}"'))
+def live_manifest(ctx: SimpleNamespace, model: str, prompt: str) -> None:
+    live = RunManifest(
+        provider="anthropic", model=model, reasoning_effort="none",
+        system_prompt_hash=prompt, toolset_hash="t", harness_version="h",
+        task_set_hash="tasks",
+    )
+    ctx.compatible, ctx.reasons = manifests_compatible(ctx.frozen_manifest, live)
+
+
+@then("the frozen control is compatible")
+def control_compatible(ctx: SimpleNamespace) -> None:
+    assert ctx.compatible, ctx.reasons
+
+
+@then(parsers.parse('the frozen control is refused with reason "{fragment}"'))
+def control_refused(ctx: SimpleNamespace, fragment: str) -> None:
+    assert not ctx.compatible, ctx.reasons
+    assert any(fragment in r for r in ctx.reasons), ctx.reasons
+
+
+@given("no frozen control manifest exists")
+def no_frozen_manifest(ctx: SimpleNamespace) -> None:
+    ctx.frozen_manifest = None
+
+
+@when("the comparison is planned")
+def plan_comparison(ctx: SimpleNamespace) -> None:
+    ctx.compatible, ctx.reasons = manifests_compatible(
+        ctx.frozen_manifest,
+        RunManifest(
+            provider="anthropic", model="m", reasoning_effort="none",
+            system_prompt_hash="p", toolset_hash="t", harness_version="h",
+            task_set_hash="tasks",
+        ),
+    )
+
+
+@then("the run demands fresh control trajectories")
+def demands_fresh(ctx: SimpleNamespace) -> None:
+    assert not ctx.compatible, ctx.reasons
+
+
+@given(parsers.parse(
+    "a failed slicer run where target_in_slice is {target}, slice_dominated is {dominated}, "
+    "slice_truncated is {truncated}, edit_rejections is {rejects:d}, and suite_ok is {suite}"
+))
+def failed_run_flags(ctx: SimpleNamespace, target: str, dominated: str, truncated: str, rejects: int, suite: str) -> None:
+    ctx.failure_flags = dict(
+        solved=False,
+        target_in_slice=target == "yes",
+        slice_dominated=dominated == "yes",
+        slice_truncated=truncated == "yes",
+        edit_rejections=rejects,
+        suite_ok=suite == "yes",
+    )
+
+
+@then(parsers.parse('the failure class is "{klass}"'))
+def failure_class_is(ctx: SimpleNamespace, klass: str) -> None:
+    assert attribute_failure(**ctx.failure_flags) == klass

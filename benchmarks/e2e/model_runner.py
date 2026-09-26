@@ -85,6 +85,7 @@ def parse_response(payload: dict[str, Any]) -> UsageRecord:
         cached_input_tokens=usage.get("cache_read_input_tokens", 0),
         cache_write_tokens=usage.get("cache_creation_input_tokens", 0),
         output_tokens=usage["output_tokens"],
+        reasoning_tokens=usage.get("reasoning_tokens", 0),
     )
 
 

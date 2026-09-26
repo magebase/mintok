@@ -43,6 +43,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -173,11 +174,13 @@ def check(root: Path, task_id: str, log: Path) -> None:
 
 def record(arm: str, task_id: str, log: Path) -> None:
     score = json.loads((log.parent / f"{log.stem}.score.json").read_text())
+    usage_path = log.parent / f"{log.stem}.usage.json"
+    usage = json.loads(usage_path.read_text()) if usage_path.exists() else None
     run = RunRecord(
         task_id=task_id,
         arm=arm,
         solved=score["solved"],
-        frontier_usd=0.0,  # billed cost unobservable outside an API harness (see RESULTS.md)
+        frontier_usd=usage["usd"] if usage else 0.0,  # billed via provider telemetry when present
         input_tokens=score["tool_output_tokens"] + score["prompt_tokens"],
         output_tokens=score["tool_input_tokens"],
         turns=score["turns"],
@@ -524,55 +527,120 @@ def slice_cmd(task_id: str | None, eval_all: bool) -> None:
 
 
 def promote_large(model: str, mock: bool = False) -> None:
-    """Isolated live test: slicer arm vs the frozen control-eval trajectories.
+    """Isolated live test: slicer arm vs control on the same 15 large tasks.
 
-    Clean causal comparison on the same 15 large-module tasks: the control
-    arm's trajectories already exist from the frozen eval, so only the
-    slicer arm runs live. Verdict against the pre-registered bar. With
-    --mock the frontier model is replaced by a scripted fake (slice, suite,
-    stop): plumbing validation only, nothing is recorded, the verdict is
-    not meaningful.
+    Manifest guard: the frozen control-eval trajectories are reused ONLY
+    when their recorded manifest matches the live slicer configuration
+    (provider, model, reasoning effort, system prompt, toolset, harness
+    version, task set). Otherwise — and whenever no manifest exists — a
+    fresh control arm runs on the same tasks in the same session. With
+    --mock the model is a scripted fake; plumbing only, nothing recorded.
     """
-    from mintok.funnel import SlicerRun, slicer_promotion
+    import hashlib
+    import os
 
-    from live import run_loop
+    from mintok.funnel import (
+        RunManifest,
+        SlicerRun,
+        attribute_failure,
+        manifests_compatible,
+        slicer_promotion,
+    )
 
-    def mock_completion(model: str, system: str, messages: list, tools: list | None = None):
-        """Scripted fake agent: slice, then suite, then stop."""
+    from live import DISCIPLINE, TOOL_SCHEMAS, run_loop
+
+    def fake_completion(model_name: str, system: str, messages: list, tools: list | None = None):
+        """Scripted fake agent: primary tool, then suite, then stop."""
         calls = sum(1 for m in messages if m.get("role") == "assistant")
-        blocks = [
-            {
-                "type": "tool_use",
-                "id": f"m{calls}",
-                "name": "slice" if calls == 0 else "suite",
-                "input": {"description": "the task targets"} if calls == 0 else {},
-            }
-        ]
+        primary = tools[0]["name"] if tools else "suite"
+        arg = {"description": "the task targets"} if primary == "slice" else {"command": "true"}
         if calls >= 2:
             return "end_turn", [{"type": "text", "text": "mock complete"}], None
-        return "tool_use", blocks, None
+        return (
+            "tool_use",
+            [{"type": "tool_use", "id": f"m{calls}", "name": primary, "input": arg}],
+            None,
+        )
+
+    def arm_manifest(policy: str) -> RunManifest:
+        prompt = DISCIPLINE[policy]
+        return RunManifest(
+            provider="anthropic",
+            model=model,
+            reasoning_effort=os.environ.get("MINTOK_REASONING_EFFORT", "none"),
+            system_prompt_hash=hashlib.sha256(prompt.encode()).hexdigest()[:16],
+            toolset_hash=hashlib.sha256(
+                json.dumps(TOOL_SCHEMAS[policy], sort_keys=True).encode()
+            ).hexdigest()[:16],
+            harness_version=subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=HARNESS_ROOT, capture_output=True, text=True,
+            ).stdout.strip(),
+            task_set_hash=hashlib.sha256(TASKS_JSON.read_bytes()).hexdigest()[:16],
+        )
 
     tasks = [t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"]
     scratch = Path("/home/aqua/bench-run")
     scratch.mkdir(parents=True, exist_ok=True)
+
+    frozen_path = RUNS_DIR / "control-eval.manifest.json"
+    frozen = RunManifest.from_json(frozen_path.read_text()) if frozen_path.exists() else None
+    live_manifest = arm_manifest("S")
+    compatible, reasons = manifests_compatible(frozen, live_manifest)
+    if compatible:
+        control_arm = "control-eval"
+        print("manifest guard: frozen control-eval matches live config; reusing control trajectories")
+    else:
+        control_arm = "control-large"
+        print("manifest guard: frozen control NOT reusable ->")
+        for reason in reasons:
+            print(f"  - {reason}")
+        print("running 15 fresh control trajectories in this session (worth the spend)")
+
     runs: list[SlicerRun] = []
+    control_rows: dict[str, dict] = {}
     for task in tasks:
         task_id = task["id"]
         copy = scratch / "copies" / f"{task_id}-slicer"
         prepare(copy, task_id)
         log = scratch / "logs" / f"{task_id}-slicer.jsonl"
         log.unlink(missing_ok=True)
-        summary = run_loop(
+        run_loop(
             copy, log, "S", task["instruction"], model,
-            completion=mock_completion if mock else None,
+            completion=fake_completion if mock else None,
         )
         check(copy, task_id, log)
 
         entries = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
-        slice_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "slice")
+        slice_entries = [e for e in entries if e.get("tool") == "slice"]
+        slice_tok = sum(estimate_tokens(e.get("output", "")) for e in slice_entries)
         fallback_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "read")
+        edit_rejections = sum(
+            1 for e in entries if e.get("tool") == "patch" and str(e.get("output", "")).startswith("rejected")
+        )
+        slice_spans = []
+        for e in slice_entries:
+            slice_spans += re.findall(r"([\w./-]+\.py):(\d+)-(\d+)", e.get("output", ""))
+        accepted_patches = [
+            (e["args"]["file"], e["args"]["start"], e["args"]["end"])
+            for e in entries
+            if e.get("tool") == "patch" and str(e.get("output", "")).startswith("patched")
+        ]
+        target_in_slice = any(
+            any(p == f and int(s) <= a and int(t) >= b for p, s, t in slice_spans)
+            for f, a, b in accepted_patches
+        )
         score = json.loads((log.parent / f"{log.stem}.score.json").read_text())
         prompt_tokens = estimate_tokens(task["instruction"]) + PROMPT_OVERHEAD_TOKENS
+        flags = dict(
+            solved=score["solved"],
+            target_in_slice=target_in_slice,
+            slice_dominated=slice_tok >= fallback_tok,
+            slice_truncated=any(e.get("expanded") for e in slice_entries),
+            edit_rejections=edit_rejections,
+            suite_ok=score["suite_ok"],
+        )
+        klass = attribute_failure(**flags)
         runs.append(
             SlicerRun(
                 task_id=task_id,
@@ -581,29 +649,69 @@ def promote_large(model: str, mock: bool = False) -> None:
                 turns=score["turns"],
                 slice_tokens=slice_tok,
                 fallback_tokens=fallback_tok,
-                expanded=any(e.get("expanded") for e in entries),
+                expanded=flags["slice_truncated"],
             )
         )
         if not mock:
             record("slicer-large", task_id, log)
-        print(f"{task_id}: solved={runs[-1].solved} tokens={runs[-1].tokens} turns={runs[-1].turns}")
+        usage_path = log.parent / f"{log.stem}.usage.json"
+        usd = json.loads(usage_path.read_text())["usd"] if usage_path.exists() else 0.0
+        note = f" failure={klass}" if not score["solved"] else ""
+        print(f"{task_id}: solved={score['solved']} tokens={runs[-1].tokens} turns={runs[-1].turns} "
+              f"slice={slice_tok} fallback={fallback_tok} usd={usd:.4f}{note}")
 
-    control = {
-        json.loads(l)["task_id"]: json.loads(l)
-        for l in (RUNS_DIR / "control-eval.jsonl").read_text().splitlines()
-        if l.strip()
-    }
+        if control_arm == "control-large":
+            ccopy = scratch / "copies" / f"{task_id}-control"
+            prepare(ccopy, task_id)
+            clog = scratch / "logs" / f"{task_id}-control-large.jsonl"
+            clog.unlink(missing_ok=True)
+            run_loop(
+                ccopy, clog, "control", task["instruction"], model,
+                completion=fake_completion if mock else None,
+            )
+            check(ccopy, task_id, clog)
+            if not mock:
+                record(control_arm, task_id, clog)
+            cscore = json.loads((clog.parent / f"{clog.stem}.score.json").read_text())
+            cusage_path = clog.parent / f"{clog.stem}.usage.json"
+            control_rows[task_id] = {
+                "solved": cscore["solved"],
+                "input_tokens": cscore["tool_output_tokens"] + prompt_tokens,
+                "frontier_usd": json.loads(cusage_path.read_text())["usd"] if cusage_path.exists() else 0.0,
+            }
+
+    if control_arm == "control-eval":
+        control_rows = {
+            json.loads(l)["task_id"]: json.loads(l)
+            for l in (RUNS_DIR / f"{control_arm}.jsonl").read_text().splitlines()
+            if l.strip()
+        }
+
+    RUNS_DIR.mkdir(exist_ok=True)
+    (RUNS_DIR / "slicer-large.manifest.json").write_text(live_manifest.to_json())
+    if control_arm == "control-large" and not mock:
+        (RUNS_DIR / f"{control_arm}.manifest.json").write_text(arm_manifest("control").to_json())
+
     rep = slicer_promotion(runs, solve_target=len(tasks))
-    ctrl_solved = sum(control[r.task_id]["solved"] for r in runs)
-    ctrl_tok = sum(control[r.task_id]["input_tokens"] for r in runs)
+    ctrl_solved = sum(control_rows[r.task_id]["solved"] for r in runs)
+    ctrl_tok = sum(control_rows[r.task_id]["input_tokens"] for r in runs)
+    slicer_usd = 0.0
+    for r in runs:
+        upath = scratch / "logs" / f"{r.task_id}-slicer.usage.json"
+        if upath.exists():
+            slicer_usd += json.loads(upath.read_text())["usd"]
     label = "DRY RUN (mock model — plumbing only, verdict not meaningful)" if mock else "live"
-    print(f"\nslicer promotion ({rep.attempted} large-module tasks, {label}) vs frozen control-eval:")
+    print(f"\nslicer promotion ({rep.attempted} large-module tasks, {label}) vs {control_arm}:")
     print(f"  slicer:  solved {rep.solved}/{rep.attempted}, tok/solved {rep.tokens_per_solved:.0f}, "
-          f"turns/attempt {rep.turns_per_attempt:.1f}, p95 {rep.p95_tokens}, max {rep.max_tokens}")
-    print(f"  control: solved {ctrl_solved}/{rep.attempted}, tok/solved "
-          f"{ctrl_tok / ctrl_solved if ctrl_solved else float('inf'):.0f}")
+          f"turns/attempt {rep.turns_per_attempt:.1f}, p95 {rep.p95_tokens}, max {rep.max_tokens}, "
+          f"${slicer_usd:.4f} total" + (f" (${slicer_usd / rep.solved:.4f}/solved)" if rep.solved else ""))
+    print(f"  control: solved {ctrl_solved}/{rep.attempted}, tok/attempt {ctrl_tok / rep.attempted:.0f}")
     print(f"  slice acceptance {rep.acceptance_rate:.2f}, raw-fallback rate {rep.fallback_rate:.2f}, "
           f"expanded-slice rate {rep.expanded_rate:.2f}")
+    if control_arm == "control-large" and not mock:
+        c_usd = sum(r.get("frontier_usd", 0.0) for r in control_rows.values())
+        if rep.solved and ctrl_solved:
+            print(f"  $/solved: slicer ${slicer_usd / rep.solved:.4f} vs control ${c_usd / ctrl_solved:.4f}")
     print(f"  VERDICT: {rep.verdict.upper()} (bar: solve >= {len(tasks)}/15, "
           f"<=800 promote / <=600 strong / <=400 excellent)")
 

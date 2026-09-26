@@ -581,13 +581,35 @@ survives contact with an unseen instruction set.
 
 **Isolated live test** (`promote-large`): the slicer arm (policy S:
 slice + bounded read + line-range patch + suite) runs on the same 15
-large-module tasks with the frozen control-eval trajectories reused as
-the control arm — a clean causal comparison with only 15 live runs. The
-promotion verdict (`mintok.funnel.slicer_promotion`) is computed from
-measured trajectories against the pre-registered bar and additionally
-records turns/attempt, **slice acceptance rate** (solved tasks where the
-slice stayed the dominant information channel — raw fallback did not
-outspend it), raw-source fallback rate, and expanded-slice rate. A
-15/15 result with 12 abandoned slices does not promote. The loop driver
-(`live.py`) is orchestrator-only: the shim log stays the exact record of
-tool-side context.
+large-module tasks. Three safeguards gate the comparison:
+
+1. **Control-manifest guard.** Every arm records a manifest: provider,
+   model, reasoning effort, system-prompt hash, toolset hash, harness
+   version, task-set hash. The frozen control-eval trajectories are
+   reused only on a full manifest match; the frozen eval predates
+   manifests, so **the first promote-large run executes 15 fresh control
+   trajectories too** (the mismatch branch is the honest default).
+   Manifests are written to `runs/<arm>.manifest.json` for all future
+   reuse decisions.
+2. **Provider billing telemetry.** The loop accumulates per-call usage
+   (input, cached input, cache writes, output, reasoning tokens where
+   exposed, latency) into `<log>.usage.json` plus a per-turn billing
+   JSONL priced through `mintok.billing.PriceTable` (list-price
+   snapshots; `MINTOK_PRICE_OVERRIDES` JSON overrides drift). Run
+   records carry real `frontier_usd`; **$/solved is the headline**, with
+   tool-context tokens as the comparable diagnostic.
+3. **Failure attribution.** Every failed slicer task is classified from
+   trajectory evidence (`mintok.funnel.attribute_failure`): `bad_slice`
+   (accepted patches never landed in a slice-ranked region),
+   `insufficient_slice` (expanded/truncated package),
+   `fallback_needed` (raw reads outspent the slice), 
+   `edit_tool_limitation` (patch rejections), `checker_stochastic`
+   (suite green, checker red), `agent_reasoning_failure` (everything
+   needed was available). The verdict line prints each failure's class.
+
+The promotion verdict (`mintok.funnel.slicer_promotion`) also records
+turns/attempt and the **slice acceptance rate** (solved tasks where the
+slice stayed the dominant information channel). A 15/15 result with 12
+abandoned slices does not promote. The loop driver (`live.py`) is
+orchestrator-only: the shim log stays the exact record of tool-side
+context.
