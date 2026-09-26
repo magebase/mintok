@@ -48,6 +48,7 @@ HARNESS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HARNESS_ROOT / "src"))
 
 from mintok.abi import AgentABI  # noqa: E402
+from mintok.continuity import LearnedState, file_digests  # noqa: E402
 from mintok.tokens import estimate_tokens  # noqa: E402
 
 VENV_PY = HARNESS_ROOT / ".venv" / "bin" / "python"
@@ -111,6 +112,14 @@ POLICIES: dict[str, dict] = {
         "ops": READ_OPS | ATTRIBUTION_OPS,
         "breaker": False,
     },
+    # K: C + transparent semantic continuity (no new ops; reads of already-
+    # learned facts compress to one-line verdicts, writes report the delta)
+    "K": {
+        "tools": {"shell", "read", "suite"},
+        "ops": READ_OPS | ATTRIBUTION_OPS,
+        "breaker": False,
+        "continuity": True,
+    },
 }
 
 
@@ -162,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--policy",
         default="control",
-        help="arm policy gating the tool surface (control|mintok|B|C|D|E|F|G)",
+        help="arm policy gating the tool surface (control|mintok|B|C|D|E|F|G|H|I|J|K)",
     )
     sub = parser.add_subparsers(dest="tool", required=True)
 
@@ -232,6 +241,12 @@ def main(argv: list[str] | None = None) -> int:
     policy = POLICIES.get(args.policy)
     if policy is None:
         parser.error(f"unknown policy {args.policy}")
+    state_path = args.log.parent / f"{args.log.stem}.state.json"
+
+    def load_state() -> LearnedState:
+        if state_path.exists():
+            return LearnedState.from_json(state_path.read_text())
+        return LearnedState()
 
     entry: dict = {"tool": args.tool}
 
@@ -317,6 +332,13 @@ def main(argv: list[str] | None = None) -> int:
             kw = {k: v for k, v in entry["args"].items() if k != "op"}
             result = abi.codemod(args.op, **kw)
             output = f"codemod {args.op} ok: {result}"
+            if policy.get("continuity"):
+                state = load_state()
+                delta = state.write_delta(abi.ir, file_digests(args.root))
+                if delta:
+                    output += "\n" + delta
+                    entry["learned_delta"] = delta
+                state_path.write_text(state.to_json())
         except Exception as exc:  # noqa: BLE001 - the agent sees the failure
             return finish(f"rejected: {exc}", 1)
         return finish(output, 0)
@@ -326,10 +348,31 @@ def main(argv: list[str] | None = None) -> int:
         if args.op not in policy["ops"] and "query" not in policy["tools"]:
             return finish(f"locked: query op '{args.op}' not in policy {args.policy}", 3)
         try:
-            output = AgentABI(args.root).query(args.op, args.target)
+            abi = AgentABI(args.root)
+            output = abi.query(args.op, args.target)
+            cont = None
+            if policy.get("continuity"):
+                state = load_state()
+                digests = file_digests(args.root)
+                if args.op in ("symbol", "summary"):
+                    verdict = state.symbol_verdict(digests, abi.ir, args.target)
+                    if verdict:
+                        output, cont = verdict, "verdict"
+                    elif args.target in abi.ir.symbols:
+                        state.observe_symbol(abi.ir.symbols[args.target], digests)
+                        cont = "full"
+                elif args.op in ("callers", "writers", "effects"):
+                    verdict = state.relation_verdict(args.op, args.target, digests)
+                    if verdict:
+                        output, cont = verdict, "verdict"
+                    else:
+                        count = len(output.splitlines()) if output else 0
+                        state.observe_relation(args.op, args.target, digests, count)
+                        cont = "full"
+                state_path.write_text(state.to_json())
         except Exception as exc:  # noqa: BLE001 - the agent sees the failure
             return finish(f"error: {exc}", 1)
-        return finish(output, 0)
+        return finish(output, 0, {"continuity": cont} if cont else None)
 
     if args.tool == "inspect":
         entry["args"] = {"target": args.target}
@@ -408,6 +451,13 @@ def main(argv: list[str] | None = None) -> int:
                 output = f"patched: {result.path} lines replaced: {result.replaced_lines}"
         except Exception as exc:  # noqa: BLE001 - the agent sees the failure
             return finish(f"rejected: {exc}", 1)
+        if policy.get("continuity"):
+            state = load_state()
+            delta = state.write_delta(abi.ir, file_digests(args.root))
+            if delta:
+                output += "\n" + delta
+                entry["learned_delta"] = delta
+            state_path.write_text(state.to_json())
         return finish(output, 0)
 
     if args.tool == "suite":
