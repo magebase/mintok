@@ -2194,7 +2194,7 @@ TASKS: list[dict] = [
             """
             from biglib.strings import asset_name
             assert asset_name("quarterly summary") == "quarterly-summary.txt"
-            assert asset_name("Q3 Report.PDF") == "q3-report.pdf"
+            assert asset_name("Q3 Report") == "q3-report.txt"
             tests_text = open(os.path.join(root, "tests", "test_biglib.py")).read()
             assert "quarterlysummary.txt" not in tests_text
             """

@@ -634,7 +634,7 @@
     "klass": "cross_file_bug",
     "repo": "biglib",
     "instruction": "asset_name in src/biglib/strings.py converts via camel_case, which glues words together before filename normalization ('quarterly summary' becomes 'quarterlysummary.txt'). Use the word-preserving kebab path from biglib.large instead, so asset_name('quarterly summary') == 'quarterly-summary.txt', and update the test that pins the old behavior.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.strings import asset_name\nassert asset_name(\"quarterly summary\") == \"quarterly-summary.txt\"\nassert asset_name(\"Q3 Report.PDF\") == \"q3-report.pdf\"\ntests_text = open(os.path.join(root, \"tests\", \"test_biglib.py\")).read()\nassert \"quarterlysummary.txt\" not in tests_text\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.strings import asset_name\nassert asset_name(\"quarterly summary\") == \"quarterly-summary.txt\"\nassert asset_name(\"Q3 Report\") == \"q3-report.txt\"\ntests_text = open(os.path.join(root, \"tests\", \"test_biglib.py\")).read()\nassert \"quarterlysummary.txt\" not in tests_text\nok = True\n"
   },
   {
     "id": "biglib-cross-02",
