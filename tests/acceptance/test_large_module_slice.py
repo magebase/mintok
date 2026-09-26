@@ -81,6 +81,11 @@ def lists_write(ctx: SimpleNamespace, field: str) -> None:
     assert any(r.label == field for r in writes), ctx.slice_.text
 
 
+@then(parsers.parse('the slice shows the "{field}" field write in the writing method\'s body'))
+def shows_write_in_body(ctx: SimpleNamespace, field: str) -> None:
+    assert f"self.{field}" in ctx.slice_.text, ctx.slice_.text
+
+
 @then(parsers.parse("the package fits within {budget:d} tokens"))
 def fits(ctx: SimpleNamespace, budget: int) -> None:
     assert ctx.slice_.tokens <= budget, (ctx.slice_.tokens, ctx.slice_.text)
@@ -158,3 +163,27 @@ def test_live_loop_drives_slice_through_the_shim(tmp_path):
     assert summary["completed"] and summary["turns"] == 2, summary
     assert [e["tool"] for e in entries] == ["slice"]
     assert entries[0]["package_tokens"] > 0
+
+
+@then(parsers.parse('the slice includes the class header of "{name}"'))
+def class_header_included(ctx: SimpleNamespace, name: str) -> None:
+    headers = [r for r in ctx.slice_.regions if r.kind == "class_header"]
+    assert any(r.label == name for r in headers), ctx.slice_.text
+    assert f"class {name}" in ctx.slice_.text, ctx.slice_.text
+
+
+@then(parsers.parse('the slice includes method "{name}"'))
+def method_included(ctx: SimpleNamespace, name: str) -> None:
+    assert any(r.kind == "definition" and r.label.endswith(name) for r in ctx.slice_.regions), ctx.slice_.text
+    assert f"def {name}" in ctx.slice_.text, ctx.slice_.text
+
+
+@then(parsers.parse('the slice excludes the body of method "{name}"'))
+def method_excluded(ctx: SimpleNamespace, name: str) -> None:
+    assert f"def {name}" not in ctx.slice_.text, ctx.slice_.text
+
+
+@then("the package fits the initial budget")
+def fits_initial(ctx: SimpleNamespace) -> None:
+    assert ctx.slice_.budget == 800, ctx.slice_.budget
+    assert ctx.slice_.tokens <= 800, (ctx.slice_.tokens, ctx.slice_.text)

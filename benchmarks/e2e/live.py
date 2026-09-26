@@ -45,6 +45,7 @@ def _add_usage(total: dict, usage) -> None:  # usage: UsageRecord | None
     for field_ in ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "reasoning_tokens"):
         total[field_] += getattr(usage, field_, 0)
 MAX_TURNS = 25
+VERIFY_RESERVE = 3  # turns before the cap at which the verify nudge fires
 
 DISCIPLINE = {
     "control": (
@@ -210,7 +211,34 @@ def run_loop(
     usage_total = _empty_usage()
     per_turn: list[dict] = []
     request_metas: list[dict] = []
-    for _ in range(max_turns):
+    # Verify-then-stop (arm-neutral): a workspace with unverified edits
+    # never reaches the turn cap silently. Near the cap the model is
+    # nudged toward the suite; at the cap the harness runs the suite
+    # itself once and reserves exactly one reaction turn.
+    dirty = False
+    nudged = False
+    forced_verify = False
+    budget = max_turns
+    while not completed:
+        remaining = budget - turns
+        if remaining <= 0:
+            if dirty and not forced_verify:
+                forced_verify = True
+                budget += 1  # reserve one reaction turn after the check
+                out, _code = execute_tool(root, log, policy, "suite", {})
+                messages.append({
+                    "role": "user",
+                    "content": f"[harness] turn budget exhausted with unverified edits; forced verification:\n{out}",
+                })
+                continue
+            break
+        if dirty and not nudged and remaining <= VERIFY_RESERVE:
+            nudged = True
+            messages.append({
+                "role": "user",
+                "content": "[harness] turn budget nearly exhausted with unverified edits. "
+                "Run the suite now; stop when it passes.",
+            })
         started = time.monotonic()
         if completion is not None:
             stop, blocks, usage = completion(model, system, messages, tools=tools)[:3]
@@ -255,6 +283,10 @@ def run_loop(
         results = []
         for call in calls:
             out, code = execute_tool(root, log, policy, call["name"], call.get("input", {}))
+            if call["name"] in ("patch", "shell"):
+                dirty = True
+            elif call["name"] == "suite":
+                dirty = False
             results.append(
                 {
                     "type": "tool_result",

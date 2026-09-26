@@ -5,6 +5,22 @@ Feature: Experiment funnel
   checks first, a FAST-8 smoke suite next, then widening confirmation stages
   with sequential stopping, cached controls, and adaptive concurrency.
 
+  The same verification discipline applies to every arm: a workspace with
+  unverified edits never reaches the turn cap without a final verification
+  attempt, in control and slicer alike.
+
+  Scenario: Unverified edits are forced to verify at the turn cap
+    Given a live loop with a 4-turn budget whose model only ever patches
+    When the trajectory exhausts the budget without ever running the suite
+    Then the harness runs the suite itself exactly once
+    And the model gets one reaction turn after the forced verification
+    And the forced suite call is recorded in the shim log
+
+  Scenario: A verified trajectory is not forced to verify again
+    Given a live loop with a 4-turn budget whose model runs the suite after each patch
+    When the trajectory exhausts the budget
+    Then the harness adds no forced verification
+
   Scenario: The FAST-8 suite covers the discriminating behavior classes
     Given the full task set contains the FAST-8 tasks
     When the FAST-8 suite is selected from the full task set

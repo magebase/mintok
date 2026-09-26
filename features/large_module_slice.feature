@@ -7,6 +7,177 @@ Feature: Large-module slice backend
   "helpfulness" from turning into speculative overfetch, the packet
   failure mode.
 
+  Scenario: A class-level target is sliced by member methods, not dumped
+    Given a repository with files:
+      """
+      # file: src/big.py
+      class Wide:
+          # Wide owns several padded methods
+
+          def alpha(self, text):
+              cleaned = text.strip()
+              if not cleaned:
+                  return "empty"
+              return cleaned.lower()
+
+          def beta(self):
+              pad = "beta"
+              for i in range(30):
+                  pad = pad + 'x0'
+                  pad = pad + 'x1'
+                  pad = pad + 'x2'
+                  pad = pad + 'x3'
+                  pad = pad + 'x4'
+                  pad = pad + 'x5'
+                  pad = pad + 'x6'
+                  pad = pad + 'x7'
+                  pad = pad + 'x8'
+                  pad = pad + 'x9'
+                  pad = pad + 'x10'
+                  pad = pad + 'x11'
+                  pad = pad + 'x12'
+                  pad = pad + 'x13'
+                  pad = pad + 'x14'
+                  pad = pad + 'x15'
+                  pad = pad + 'x16'
+                  pad = pad + 'x17'
+                  pad = pad + 'x18'
+                  pad = pad + 'x19'
+                  pad = pad + 'x20'
+                  pad = pad + 'x21'
+                  pad = pad + 'x22'
+                  pad = pad + 'x23'
+                  pad = pad + 'x24'
+                  pad = pad + 'x25'
+                  pad = pad + 'x26'
+                  pad = pad + 'x27'
+                  pad = pad + 'x28'
+                  pad = pad + 'x29'
+                  pad = pad + 'x30'
+                  pad = pad + 'x31'
+                  pad = pad + 'x32'
+                  pad = pad + 'x33'
+                  pad = pad + 'x34'
+                  pad = pad + 'x35'
+                  pad = pad + 'x36'
+                  pad = pad + 'x37'
+                  pad = pad + 'x38'
+                  pad = pad + 'x39'
+                  pad = pad + 'x40'
+                  pad = pad + 'x41'
+                  pad = pad + 'x42'
+                  pad = pad + 'x43'
+                  pad = pad + 'x44'
+              return pad
+
+          def gamma(self):
+              pad = "gamma"
+              for i in range(30):
+                  pad = pad + 'x0'
+                  pad = pad + 'x1'
+                  pad = pad + 'x2'
+                  pad = pad + 'x3'
+                  pad = pad + 'x4'
+                  pad = pad + 'x5'
+                  pad = pad + 'x6'
+                  pad = pad + 'x7'
+                  pad = pad + 'x8'
+                  pad = pad + 'x9'
+                  pad = pad + 'x10'
+                  pad = pad + 'x11'
+                  pad = pad + 'x12'
+                  pad = pad + 'x13'
+                  pad = pad + 'x14'
+                  pad = pad + 'x15'
+                  pad = pad + 'x16'
+                  pad = pad + 'x17'
+                  pad = pad + 'x18'
+                  pad = pad + 'x19'
+                  pad = pad + 'x20'
+                  pad = pad + 'x21'
+                  pad = pad + 'x22'
+                  pad = pad + 'x23'
+                  pad = pad + 'x24'
+                  pad = pad + 'x25'
+                  pad = pad + 'x26'
+                  pad = pad + 'x27'
+                  pad = pad + 'x28'
+                  pad = pad + 'x29'
+                  pad = pad + 'x30'
+                  pad = pad + 'x31'
+                  pad = pad + 'x32'
+                  pad = pad + 'x33'
+                  pad = pad + 'x34'
+                  pad = pad + 'x35'
+                  pad = pad + 'x36'
+                  pad = pad + 'x37'
+                  pad = pad + 'x38'
+                  pad = pad + 'x39'
+                  pad = pad + 'x40'
+                  pad = pad + 'x41'
+                  pad = pad + 'x42'
+                  pad = pad + 'x43'
+                  pad = pad + 'x44'
+              return pad
+
+          def delta(self):
+              pad = "delta"
+              for i in range(30):
+                  pad = pad + 'x0'
+                  pad = pad + 'x1'
+                  pad = pad + 'x2'
+                  pad = pad + 'x3'
+                  pad = pad + 'x4'
+                  pad = pad + 'x5'
+                  pad = pad + 'x6'
+                  pad = pad + 'x7'
+                  pad = pad + 'x8'
+                  pad = pad + 'x9'
+                  pad = pad + 'x10'
+                  pad = pad + 'x11'
+                  pad = pad + 'x12'
+                  pad = pad + 'x13'
+                  pad = pad + 'x14'
+                  pad = pad + 'x15'
+                  pad = pad + 'x16'
+                  pad = pad + 'x17'
+                  pad = pad + 'x18'
+                  pad = pad + 'x19'
+                  pad = pad + 'x20'
+                  pad = pad + 'x21'
+                  pad = pad + 'x22'
+                  pad = pad + 'x23'
+                  pad = pad + 'x24'
+                  pad = pad + 'x25'
+                  pad = pad + 'x26'
+                  pad = pad + 'x27'
+                  pad = pad + 'x28'
+                  pad = pad + 'x29'
+                  pad = pad + 'x30'
+                  pad = pad + 'x31'
+                  pad = pad + 'x32'
+                  pad = pad + 'x33'
+                  pad = pad + 'x34'
+                  pad = pad + 'x35'
+                  pad = pad + 'x36'
+                  pad = pad + 'x37'
+                  pad = pad + 'x38'
+                  pad = pad + 'x39'
+                  pad = pad + 'x40'
+                  pad = pad + 'x41'
+                  pad = pad + 'x42'
+                  pad = pad + 'x43'
+                  pad = pad + 'x44'
+              return pad
+
+      """
+    And an instruction "Wide.alpha must treat empty text as empty"
+    When the task is sliced
+    Then the slice includes the class header of "Wide"
+    And the slice includes method "alpha"
+    And the slice excludes the body of method "gamma"
+    And the package fits the initial budget
+
   Scenario: The named function's definition ranks first with its exact span
     Given a repository with files:
       """
@@ -74,7 +245,7 @@ Feature: Large-module slice backend
     And an instruction "Config.bump should validate before assigning timeout"
     When the task is sliced
     Then the first region defines "bump"
-    And the package lists a "Config.timeout" write
+    And the slice shows the "timeout" field write in the writing method's body
 
   Scenario: Supplementary regions respect the initial token budget
     Given a repository with files:

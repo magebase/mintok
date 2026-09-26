@@ -127,6 +127,49 @@ def _test_regions(root: Path, names: list[str]) -> list[Region]:
     return regions
 
 
+def _class_member_regions(root: Path, sym, strong: list[str]) -> list[Region]:
+    """A class target emits its header plus ranked member methods.
+
+    Dumping a 900-line class is the packet failure mode at class
+    granularity: rank members instead — the named method first, then
+    methods sharing its name terms, then siblings in source order — and
+    let the greedy budget inclusion drop what does not fit.
+    """
+    path = sym.source.path
+    try:
+        tree = ast.parse((root / path).read_text(errors="replace"))
+    except SyntaxError:
+        return [Region(path, sym.source.start_line, sym.source.end_line, "definition", sym.name, 12.0)]
+    class_name = _last_token(sym.name)
+    node = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == class_name),
+        None,
+    )
+    if node is None:
+        return [Region(path, sym.source.start_line, sym.source.end_line, "definition", sym.name, 12.0)]
+    regions = [Region(path, node.lineno, node.lineno, "class_header", class_name, 12.0)]
+    methods = [n for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for method in methods:
+        score = 0.0
+        for term in strong:
+            if term.lower() == method.name.lower():
+                score = max(score, 12.0)
+            elif term.lower() in method.name.lower():
+                score = max(score, 4.0)
+        regions.append(
+            Region(
+                path,
+                method.lineno,
+                method.end_lineno or method.lineno,
+                "definition",
+                f"{class_name}.{method.name}",
+                score or 0.5,
+            )
+        )
+    regions.sort(key=lambda r: -r.score)
+    return regions
+
+
 def _is_test_path(path: str) -> bool:
     parts = Path(path).parts
     return (len(parts) > 1 and parts[0] in ("tests", "test")) or Path(path).name.startswith("test_")
@@ -159,23 +202,38 @@ def slice_task(
     scored = _score_symbols(ir, strong, weak)
 
     exact = [(score, sym) for score, sym in scored if score >= 12.0] or scored[:2]
-    # A method beats its own class: the class is the container, the method
-    # is the operative target of the change.
-    targets = [
-        (score, sym)
-        for score, sym in exact
-        if sym.kind != "class"
-        or not any(
-            other[1].kind in ("function", "method") and other[1].id.startswith(sym.id + ".")
-            for other in exact
-        )
-    ] or exact[:1]
+    # A class target is not dumped whole: it expands to a header plus
+    # ranked member methods (_class_member_regions). A method target
+    # stays a plain definition; when both the class and one of its
+    # methods match, the class expansion dedupes the shared member.
+    targets = exact or scored[:2]
 
     by_id = ir.symbols
-    regions: list[Region] = [
-        Region(sym.source.path, sym.source.start_line, sym.source.end_line, "definition", sym.name, score)
-        for score, sym in targets
-    ]
+    regions: list[Region] = []
+    seen_spans: set[tuple[str, int]] = set()
+    for score, sym in targets:
+        if sym.kind == "class":
+            for region in _class_member_regions(root, sym, strong):
+                key = (region.path, region.start)
+                if key not in seen_spans:
+                    seen_spans.add(key)
+                    regions.append(region)
+        else:
+            key = (sym.source.path, sym.source.start_line)
+            if key not in seen_spans:
+                seen_spans.add(key)
+                regions.append(
+                    Region(sym.source.path, sym.source.start_line, sym.source.end_line, "definition", sym.name, score)
+                )
+
+    # Primary target first: the highest-scored definition (a class's
+    # named method beats its container), then the class header, then
+    # remaining members in score order (stable: source order on ties).
+    definitions = sorted(
+        (r for r in regions if r.kind == "definition"), key=lambda r: -r.score
+    )
+    headers = [r for r in regions if r.kind == "class_header"]
+    regions = definitions[:1] + headers + definitions[1:]
 
     callers: list[Region] = []
     writes: list[Region] = []
@@ -253,19 +311,30 @@ def slice_task(
     regions += kept[:_MAX_TESTS]
 
     budget = initial_budget
-    definition_tokens = sum(
-        estimate_tokens(_excerpt(root, r)) for r in regions if r.kind == "definition"
-    )
-    if definition_tokens > initial_budget:
-        budget = expanded_budget
+    definition_regions = [r for r in regions if r.kind == "definition"]
+    header_tokens = sum(estimate_tokens(_excerpt(root, r)) for r in regions if r.kind == "class_header")
+    if definition_regions and header_tokens == 0:
+        # Whole-symbol targets (functions) keep the expand-on-oversize rule.
+        definition_tokens = sum(estimate_tokens(_excerpt(root, r)) for r in definition_regions)
+        if definition_tokens > initial_budget:
+            budget = expanded_budget
 
     # Greedy inclusion against the real rendered size, so headers and
     # excerpts count toward the budget the way the agent pays for them.
+    # The primary definition is never dropped; member methods beyond the
+    # budget are (that is the point of member-method slicing), as are
+    # non-definition regions.
     included: list[Region] = []
     dropped = False
+    primary_kept = False
     for region in regions:
+        is_primary = region.kind == "definition" and not primary_kept
+        if is_primary:
+            primary_kept = True
+            included.append(region)
+            continue
         candidate = included + [region]
-        if region.kind != "definition" and estimate_tokens(_render(root, candidate, budget)) > budget:
+        if estimate_tokens(_render(root, candidate, budget)) > budget:
             dropped = True
             continue
         included.append(region)
@@ -284,16 +353,21 @@ def slice_task(
 
 def _render(root: Path, regions: list[Region], budget: int) -> str:
     out: list[str] = []
-    for kind, title in (
+    groups = (
+        ("class_header", "target candidates"),
         ("definition", "target candidates"),
         ("caller", "relevant callers"),
         ("write", "relevant writes"),
         ("test", "relevant tests"),
-    ):
+    )
+    rendered_titles: set[str] = set()
+    for kind, title in groups:
         group = [r for r in regions if r.kind == kind]
         if not group:
             continue
-        out.append(f"{title}:")
+        if title not in rendered_titles:
+            out.append(f"{title}:")
+            rendered_titles.add(title)
         out.extend(_render_line(r) for r in group)
     out.append(_EXCERPT_MARK)
     for region in sorted(regions, key=lambda r: (r.path, r.start)):

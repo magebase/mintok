@@ -417,3 +417,116 @@ def second_checker_sees_own_copy(ctx: SimpleNamespace) -> None:
 @then("a checker that passes is recorded as solved regardless of position")
 def pass_is_solved_at_any_position(ctx: SimpleNamespace) -> None:
     assert ctx.score_b["solved"] is True
+
+
+def _make_live(tmp_path, replies):
+    """Build a run_loop with scripted completions over a tiny repo."""
+    import importlib.util
+    import json as jsonlib
+
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True, exist_ok=True)
+    (root / "src" / "big.py").write_text("def f():\n    return 1\n")
+    log = tmp_path / "t.jsonl"
+
+    spec = importlib.util.spec_from_file_location(
+        "live_for_verify", _REPO_ROOT / "benchmarks" / "e2e" / "live.py"
+    )
+    assert spec is not None and spec.loader is not None
+    live = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(live)
+    iterator = iter(replies)
+
+    def completion(model, system, messages, tools=None):
+        return next(iterator)
+
+    return live, root, log, completion
+
+
+@pytest.fixture
+def patch_only_replies():
+    """A model that patches forever and never verifies."""
+    return [
+        (
+            "tool_use",
+            [{"type": "tool_use", "id": f"t{i}", "name": "patch",
+              "input": {"file": "src/big.py", "start": 1, "end": 1,
+                        "source": f"def f():\n    return {i}\n"}}],
+            None,
+        )
+        for i in range(10)
+    ]
+
+
+@given("a live loop with a 4-turn budget whose model only ever patches")
+def live_patch_only(ctx: SimpleNamespace, tmp_path, patch_only_replies) -> None:
+    ctx.live, ctx.root, ctx.log, ctx.completion = _make_live(tmp_path, patch_only_replies)
+    ctx.max_turns = 4
+
+
+@given("a live loop with a 4-turn budget whose model runs the suite after each patch")
+def live_verifying_model(ctx: SimpleNamespace, tmp_path) -> None:
+    replies = []
+    for i in range(4):
+        replies.append((
+            "tool_use",
+            [{"type": "tool_use", "id": f"p{i}", "name": "patch",
+              "input": {"file": "src/big.py", "start": 1, "end": 1,
+                        "source": f"def f():\n    return {i}\n"}}],
+            None,
+        ))
+        replies.append((
+            "tool_use",
+            [{"type": "tool_use", "id": f"s{i}", "name": "suite", "input": {}}],
+            None,
+        ))
+    ctx.live, ctx.root, ctx.log, ctx.completion = _make_live(tmp_path, replies)
+    ctx.max_turns = 4
+
+
+@when("the trajectory exhausts the budget without ever running the suite")
+def exhaust_budget_dirty(ctx: SimpleNamespace) -> None:
+    ctx.summary = ctx.live.run_loop(
+        ctx.root, ctx.log, "S", "fix f", "fake", max_turns=ctx.max_turns,
+        completion=ctx.completion,
+    )
+
+
+@when("the trajectory exhausts the budget")
+def exhaust_budget_clean(ctx: SimpleNamespace) -> None:
+    ctx.summary = ctx.live.run_loop(
+        ctx.root, ctx.log, "S", "fix f", "fake", max_turns=ctx.max_turns,
+        completion=ctx.completion,
+    )
+
+
+@then("the harness runs the suite itself exactly once")
+def forced_suite_once(ctx: SimpleNamespace) -> None:
+    import json as jsonlib
+
+    entries = [jsonlib.loads(l) for l in ctx.log.read_text().splitlines() if l.strip()]
+    forced = [e for e in entries if e["tool"] == "suite"]
+    assert len(forced) == 1, [e["tool"] for e in entries]
+
+
+@then("the model gets one reaction turn after the forced verification")
+def reaction_turn(ctx: SimpleNamespace) -> None:
+    # turns = budget + forced verification turn; the loop then terminates
+    assert ctx.summary["turns"] == ctx.max_turns + 1, ctx.summary
+
+
+@then("the forced suite call is recorded in the shim log")
+def forced_in_shim_log(ctx: SimpleNamespace) -> None:
+    import json as jsonlib
+
+    entries = [jsonlib.loads(l) for l in ctx.log.read_text().splitlines() if l.strip()]
+    assert any(e["tool"] == "suite" for e in entries)
+
+
+@then("the harness adds no forced verification")
+def no_forced_verification(ctx: SimpleNamespace) -> None:
+    import json as jsonlib
+
+    entries = [jsonlib.loads(l) for l in ctx.log.read_text().splitlines() if l.strip()]
+    model_suites = sum(1 for e in entries if e["tool"] == "suite")
+    assert model_suites == 2, [e["tool"] for e in entries]  # exactly the model's own

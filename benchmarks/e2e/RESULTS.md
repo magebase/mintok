@@ -692,3 +692,32 @@ What the data says:
 The $-denominated claim remains blocked on a nonzero-priced model (both
 arms $0.00 here); provider tokens/solved is the Stage-1 headline by
 pre-decision. A paid Stage-2 run awaits the user's call.
+
+### Stage-1B (pre-registered before the rerun): diagnosis-tuned arm
+
+Two fixes, both chosen **after** inspecting the 15 Stage-1A tasks — so
+this 15-task set is now a development set and Stage-1B is a **development
+regression test**, never independent confirmation:
+
+1. **Verify-then-stop** (arm-neutral harness policy): a trajectory with
+   unverified edits is nudged toward the suite within 3 turns of the cap
+   and, at the cap, the harness runs the suite itself once and reserves
+   one reaction turn. Applied identically to control and slicer in all
+   future comparisons.
+2. **Member-method slicing**: a class-level target emits the class
+   header plus ranked member methods (named method first, then
+   term-related siblings, then source order) under the **same** hard
+   budgets — 800 initial / 2,000 expanded, unchanged.
+
+Stage-1A (13/15, 4.9x less tool-context+prompt per solved task, REJECT
+on the solve bar) is permanently recorded above and must not be
+overwritten or reinterpreted; its records are archived at
+`/home/aqua/bench-run/stage1a/`.
+
+**Stage-1B gates** (both must hold to justify building a fresh holdout):
+solve 15/15, and provider tokens/solved retains ≥ ~3x reduction vs the
+same-model control. Stage-1B passing does not promote; it only qualifies
+the apparatus for the fresh-holdout gate (slicer ≥ control solve rate,
+≥2x provider-token reduction required / ≥3x strong, no catastrophic
+p95/max tails, healthy slice acceptance). Paid Stage-2 frontier
+calibration happens only after the fresh holdout passes.
