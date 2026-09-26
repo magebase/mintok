@@ -1645,7 +1645,7 @@ TASKS: list[dict] = [
             from webledger.validation import ValidationError
             journal = Journal(ChartOfAccounts().default_chart())
             try:
-                journal.post_simple("2024-3-1", "m", "100", "400", 500)
+                journal.post_simple("24-03-01", "m", "100", "400", 500)
                 raise AssertionError("expected ValidationError")
             except ValidationError:
                 pass

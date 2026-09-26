@@ -473,7 +473,7 @@
     "klass": "cross_file_bug",
     "repo": "webledger",
     "instruction": "Journal.post_simple in src/webledger/journal.py posts entries with never-validated dates even though validation.validate_date exists. Validate the date (raising ValidationError) inside post_simple so malformed dates cannot enter the journal directly or via PeriodBook.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.validation import ValidationError\njournal = Journal(ChartOfAccounts().default_chart())\ntry:\n    journal.post_simple(\"2024-3-1\", \"m\", \"100\", \"400\", 500)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\njournal.post_simple(\"2024-03-01\", \"m\", \"100\", \"400\", 500)\nassert len(journal.entries()) == 1\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.validation import ValidationError\njournal = Journal(ChartOfAccounts().default_chart())\ntry:\n    journal.post_simple(\"24-03-01\", \"m\", \"100\", \"400\", 500)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\njournal.post_simple(\"2024-03-01\", \"m\", \"100\", \"400\", 500)\nassert len(journal.entries()) == 1\nok = True\n"
   },
   {
     "id": "webledger-cross-02",
