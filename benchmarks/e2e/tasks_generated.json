@@ -25,14 +25,14 @@
     "klass": "cross_file_bug",
     "repo": "shopcart",
     "instruction": "OrderService.order_summary in src/shopcart/orders.py misuses pricing.compute_total by passing order.total_cents as the subtotal. Fix it so 'subtotal' is the sum of the order line totals, 'discount' is the code discount that was applied, and 'total' equals order.total_cents.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"B1\", \"Book\", 1995), 2)\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\nsummary = service.order_summary(order)\nassert summary[\"subtotal\"] == 3591, summary\nassert summary[\"discount\"] == 399, summary\nassert summary[\"total\"] == order.total_cents, summary\nassert summary[\"lines\"] == 2, summary\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"BOOK-001\", \"Book\", 1995), 2)\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\nsummary = service.order_summary(order)\nassert summary[\"subtotal\"] == 3591, summary\nassert summary[\"discount\"] == 399, summary\nassert summary[\"total\"] == order.total_cents, summary\nassert summary[\"lines\"] == 2, summary\nok = True\n"
   },
   {
     "id": "shopcart-cross-02",
     "klass": "cross_file_bug",
     "repo": "shopcart",
     "instruction": "Free shipping must be decided on the discounted subtotal, not the raw cart subtotal. Add an optional discount_cents parameter (default 0) to shipping_for_cart in src/shopcart/shipping.py, and update OrderService.place_order in src/shopcart/orders.py to pass the applied discount when it calls shipping_for_cart.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nfrom shopcart.shipping import shipping_for_cart\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"X1\", \"Thing\", 4000), 2)  # subtotal 8000\nassert shipping_for_cart(cart, \"US\", discount_cents=800) == 500\nservice = OrderService(Inventory())\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\n# discounted 7200 < threshold, so shipping 500 applies\nassert order.total_cents == 7200 + 594 + 500, order.total_cents\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nfrom shopcart.shipping import shipping_for_cart\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"TEE-L\", \"Thing\", 4000), 2)  # subtotal 8000\nassert shipping_for_cart(cart, \"US\", discount_cents=800) == 500\nservice = OrderService(Inventory())\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\n# discounted 7200 < threshold, so shipping 500 applies\nassert order.total_cents == 7200 + 594 + 500, order.total_cents\nok = True\n"
   },
   {
     "id": "shopcart-cross-03",
@@ -46,7 +46,7 @@
     "klass": "cross_file_bug",
     "repo": "shopcart",
     "instruction": "Placing an order to an unknown region currently raises ValueError from the shipping module. Make OrderService.place_order in src/shopcart/orders.py fall back to the 'ROW' regional rate for unrecognized regions so placement succeeds.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"M1\", \"Mug\", 825), 1)\ntry:\n    order = service.place_order(cart, \"MARS\")\nexcept ValueError as exc:\n    raise AssertionError(f\"place_order raised: {exc}\")\nassert order.total_cents == 825 + 68 + 2000, order.total_cents\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"MUG-100\", \"Mug\", 825), 1)\ntry:\n    order = service.place_order(cart, \"MARS\")\nexcept ValueError as exc:\n    raise AssertionError(f\"place_order raised: {exc}\")\nassert order.total_cents == 825 + 68 + 2000, order.total_cents\nok = True\n"
   },
   {
     "id": "shopcart-cross-05",
@@ -88,7 +88,7 @@
     "klass": "feature_addition",
     "repo": "shopcart",
     "instruction": "Give render_receipt in src/shopcart/receipts.py an optional breakdown parameter (a pricing dict from compute_total, default None). When provided, append 'Subtotal', 'Discount', 'Shipping' and 'Tax' lines with formatted money before the TOTAL line; without it the receipt is unchanged.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(\n    order_id=\"ORD-1\",\n    lines=[(\"B1\", \"Book\", 1, 1995), (\"M1\", \"Mug\", 1, 825)],\n    total_cents=3247,\n)\nbreakdown = {\"subtotal\": 2820, \"discount\": 282, \"shipping\": 500, \"tax\": 209, \"total\": 3247}\ntext = render_receipt(order, breakdown=breakdown)\nassert \"Subtotal $28.20\" in text, text\nassert \"Discount $2.82\" in text, text\nassert \"Shipping $5.00\" in text, text\nassert \"Tax $2.09\" in text, text\nassert \"TOTAL\" in text and \"$32.47\" in text, text\nassert \"Subtotal\" not in render_receipt(order)\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(\n    order_id=\"ORD-1\",\n    lines=[(\"BOOK-001\", \"Book\", 1, 1995), (\"MUG-100\", \"Mug\", 1, 825)],\n    total_cents=3247,\n)\nbreakdown = {\"subtotal\": 2820, \"discount\": 282, \"shipping\": 500, \"tax\": 209, \"total\": 3247}\ntext = render_receipt(order, breakdown=breakdown)\nassert \"Subtotal $28.20\" in text, text\nassert \"Discount $2.82\" in text, text\nassert \"Shipping $5.00\" in text, text\nassert \"Tax $2.09\" in text, text\nassert \"TOTAL\" in text and \"$32.47\" in text, text\nassert \"Subtotal\" not in render_receipt(order)\nok = True\n"
   },
   {
     "id": "shopcart-refactor-01",
@@ -109,7 +109,7 @@
     "klass": "refactor",
     "repo": "shopcart",
     "instruction": "Rename OrderService.place_order to checkout in src/shopcart/orders.py and update every caller (including tests) so the fixture suite passes. Behavior must be identical.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nassert \"place_order\" not in OrderService.__dict__\nassert \"checkout\" in OrderService.__dict__\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"M1\", \"Mug\", 825), 1)\nassert service.checkout(cart, \"US\").order_id.startswith(\"ORD-\")\ntests_text = open(os.path.join(root, \"tests\", \"test_orders.py\")).read()\nassert \"place_order\" not in tests_text\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nassert \"place_order\" not in OrderService.__dict__\nassert \"checkout\" in OrderService.__dict__\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"MUG-100\", \"Mug\", 825), 1)\nassert service.checkout(cart, \"US\").order_id.startswith(\"ORD-\")\ntests_text = open(os.path.join(root, \"tests\", \"test_orders.py\")).read()\nassert \"place_order\" not in tests_text\nok = True\n"
   },
   {
     "id": "shopcart-api-01",
@@ -123,7 +123,7 @@
     "klass": "api_signature_propagation",
     "repo": "shopcart",
     "instruction": "Add a width keyword parameter (default 32) to render_receipt in src/shopcart/receipts.py controlling the length of the dashed rule lines. Callers without the argument must see byte-identical output.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(order_id=\"ORD-1\", lines=[(\"B1\", \"Book\", 1, 1995)], total_cents=1995)\nwide = render_receipt(order, width=40).splitlines()\nassert wide[1] == \"-\" * 40 and wide[-2] == \"-\" * 40\nnormal = render_receipt(order).splitlines()\nassert normal[1] == \"-\" * 32 and normal[-2] == \"-\" * 32\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(order_id=\"ORD-1\", lines=[(\"BOOK-001\", \"Book\", 1, 1995)], total_cents=1995)\nwide = render_receipt(order, width=40).splitlines()\nassert wide[1] == \"-\" * 40 and wide[-2] == \"-\" * 40\nnormal = render_receipt(order).splitlines()\nassert normal[1] == \"-\" * 32 and normal[-2] == \"-\" * 32\nok = True\n"
   },
   {
     "id": "shopcart-api-03",
@@ -137,7 +137,7 @@
     "klass": "api_signature_propagation",
     "repo": "shopcart",
     "instruction": "Add an order_id keyword parameter (default None) to OrderService.place_order in src/shopcart/orders.py: when supplied, the placed order uses that id instead of the generated one; otherwise generation is unchanged.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"M1\", \"Mug\", 825), 1)\ncustom = service.place_order(cart, \"US\", order_id=\"CUSTOM-9\")\nassert custom.order_id == \"CUSTOM-9\"\nagain = service.place_order(cart, \"US\")\nassert again.order_id.startswith(\"ORD-\")\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"MUG-100\", \"Mug\", 825), 1)\ncustom = service.place_order(cart, \"US\", order_id=\"CUSTOM-9\")\nassert custom.order_id == \"CUSTOM-9\"\nagain = service.place_order(cart, \"US\")\nassert again.order_id.startswith(\"ORD-\")\nok = True\n"
   },
   {
     "id": "shopcart-schema-01",

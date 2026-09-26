@@ -140,7 +140,7 @@ TASKS: list[dict] = [
             from shopcart.orders import OrderService
             service = OrderService(Inventory())
             cart = Cart(cart_id="c")
-            cart.add(Product("B1", "Book", 1995), 2)
+            cart.add(Product("BOOK-001", "Book", 1995), 2)
             order = service.place_order(cart, "US", code="SAVE10")
             summary = service.order_summary(order)
             assert summary["subtotal"] == 3591, summary
@@ -168,7 +168,7 @@ TASKS: list[dict] = [
             from shopcart.orders import OrderService
             from shopcart.shipping import shipping_for_cart
             cart = Cart(cart_id="c")
-            cart.add(Product("X1", "Thing", 4000), 2)  # subtotal 8000
+            cart.add(Product("TEE-L", "Thing", 4000), 2)  # subtotal 8000
             assert shipping_for_cart(cart, "US", discount_cents=800) == 500
             service = OrderService(Inventory())
             order = service.place_order(cart, "US", code="SAVE10")
@@ -224,7 +224,7 @@ TASKS: list[dict] = [
             from shopcart.orders import OrderService
             service = OrderService(Inventory())
             cart = Cart(cart_id="c")
-            cart.add(Product("M1", "Mug", 825), 1)
+            cart.add(Product("MUG-100", "Mug", 825), 1)
             try:
                 order = service.place_order(cart, "MARS")
             except ValueError as exc:
@@ -358,7 +358,7 @@ TASKS: list[dict] = [
             from shopcart.receipts import render_receipt
             order = Order(
                 order_id="ORD-1",
-                lines=[("B1", "Book", 1, 1995), ("M1", "Mug", 1, 825)],
+                lines=[("BOOK-001", "Book", 1, 1995), ("MUG-100", "Mug", 1, 825)],
                 total_cents=3247,
             )
             breakdown = {"subtotal": 2820, "discount": 282, "shipping": 500, "tax": 209, "total": 3247}
@@ -430,7 +430,7 @@ TASKS: list[dict] = [
             assert "checkout" in OrderService.__dict__
             service = OrderService(Inventory())
             cart = Cart(cart_id="c")
-            cart.add(Product("M1", "Mug", 825), 1)
+            cart.add(Product("MUG-100", "Mug", 825), 1)
             assert service.checkout(cart, "US").order_id.startswith("ORD-")
             tests_text = open(os.path.join(root, "tests", "test_orders.py")).read()
             assert "place_order" not in tests_text
@@ -468,7 +468,7 @@ TASKS: list[dict] = [
             """
             from shopcart.models import Order
             from shopcart.receipts import render_receipt
-            order = Order(order_id="ORD-1", lines=[("B1", "Book", 1, 1995)], total_cents=1995)
+            order = Order(order_id="ORD-1", lines=[("BOOK-001", "Book", 1, 1995)], total_cents=1995)
             wide = render_receipt(order, width=40).splitlines()
             assert wide[1] == "-" * 40 and wide[-2] == "-" * 40
             normal = render_receipt(order).splitlines()
@@ -512,7 +512,7 @@ TASKS: list[dict] = [
             from shopcart.orders import OrderService
             service = OrderService(Inventory())
             cart = Cart(cart_id="c")
-            cart.add(Product("M1", "Mug", 825), 1)
+            cart.add(Product("MUG-100", "Mug", 825), 1)
             custom = service.place_order(cart, "US", order_id="CUSTOM-9")
             assert custom.order_id == "CUSTOM-9"
             again = service.place_order(cart, "US")
