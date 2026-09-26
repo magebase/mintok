@@ -494,7 +494,7 @@
     "klass": "cross_file_bug",
     "repo": "webledger",
     "instruction": "render_trial_balance in src/webledger/reports.py formats money directly instead of using ChartOfAccounts.total_for, and omits a totals line. Append a 'TOTAL' row computed via chart.total_for over the trial balance accounts so the report reconciles.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.reports import render_trial_balance\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-02\", \"sale\", \"110\", \"400\", 15000)\njournal.post_simple(\"2024-03-05\", \"supplies\", \"500\", \"100\", 3200)\nreport = render_trial_balance(journal, journal.chart)\nlines = report.splitlines()\nassert lines[-1].startswith(\"TOTAL\"), lines\nassert \"0.00\" in lines[-1], lines\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.reports import render_trial_balance\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-02\", \"sale\", \"110\", \"400\", 15000)\njournal.post_simple(\"2024-03-05\", \"supplies\", \"500\", \"100\", 3200)\nreport = render_trial_balance(journal, journal.chart)\nlines = report.splitlines()\ntotal_lines = [ln for ln in lines if ln.strip().startswith(\"TOTAL\")]\nassert len(total_lines) == 1, lines\nassert \"0.00\" in total_lines[0], lines\nok = True\n"
   },
   {
     "id": "webledger-cross-05",

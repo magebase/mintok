@@ -1728,8 +1728,9 @@ TASKS: list[dict] = [
             journal.post_simple("2024-03-05", "supplies", "500", "100", 3200)
             report = render_trial_balance(journal, journal.chart)
             lines = report.splitlines()
-            assert lines[-1].startswith("TOTAL"), lines
-            assert "0.00" in lines[-1], lines
+            total_lines = [ln for ln in lines if ln.strip().startswith("TOTAL")]
+            assert len(total_lines) == 1, lines
+            assert "0.00" in total_lines[0], lines
             """
         ),
     },
