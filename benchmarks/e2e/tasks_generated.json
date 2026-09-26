@@ -25,7 +25,7 @@
     "klass": "cross_file_bug",
     "repo": "shopcart",
     "instruction": "OrderService.order_summary in src/shopcart/orders.py misuses pricing.compute_total by passing order.total_cents as the subtotal. Fix it so 'subtotal' is the sum of the order line totals, 'discount' is the code discount that was applied, and 'total' equals order.total_cents.",
-    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"BOOK-001\", \"Book\", 1995), 2)\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\nsummary = service.order_summary(order)\nassert summary[\"subtotal\"] == 3591, summary\nassert summary[\"discount\"] == 399, summary\nassert summary[\"total\"] == order.total_cents, summary\nassert summary[\"lines\"] == 2, summary\nok = True\n"
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"BOOK-001\", \"Book\", 1995), 2)\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\nsummary = service.order_summary(order)\nassert summary[\"subtotal\"] == 3990, summary\nassert summary[\"discount\"] == 399, summary\nassert summary[\"total\"] == order.total_cents, summary\nassert summary[\"lines\"] == 1, summary\nok = True\n"
   },
   {
     "id": "shopcart-cross-02",

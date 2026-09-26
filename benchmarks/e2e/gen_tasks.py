@@ -143,10 +143,10 @@ TASKS: list[dict] = [
             cart.add(Product("BOOK-001", "Book", 1995), 2)
             order = service.place_order(cart, "US", code="SAVE10")
             summary = service.order_summary(order)
-            assert summary["subtotal"] == 3591, summary
+            assert summary["subtotal"] == 3990, summary
             assert summary["discount"] == 399, summary
             assert summary["total"] == order.total_cents, summary
-            assert summary["lines"] == 2, summary
+            assert summary["lines"] == 1, summary
             """
         ),
     },
