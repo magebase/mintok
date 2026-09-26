@@ -169,21 +169,26 @@ def run_loop(
     model: str,
     completion=None,
     max_turns: int = MAX_TURNS,
+    provider: str = "anthropic",
+    generation: dict | None = None,
 ) -> dict:
     """Drive one agent to completion; returns a turn and usage summary.
 
-    With the real model, per-call usage is accumulated (input, cached
+    With a real model, per-call usage is accumulated (input, cached
     input, cache writes, output, reasoning, latency) and written next to
-    the shim log as ``<stem>.usage.json`` — the billing telemetry the
-    record step prices into $/solved.
+    the shim log as ``<stem>.usage.json`` — raw provider usage, immutable
+    evidence; ``usd`` is one interpretation via the recorded price table,
+    with per-turn billing rows in ``<stem>.billing.jsonl`` for
+    recomputation when prices change.
     """
     import os
     import time
 
     from mintok.billing import PriceTable, billing_row
-    from model_runner import parse_response
+    from model_runner import parse_response, provider_key_env
 
     prices = PriceTable.load(os.environ.get("MINTOK_PRICE_OVERRIDES"))
+    price_note = "overrides" if os.environ.get("MINTOK_PRICE_OVERRIDES") else "defaults-2026-06"
 
     system = DISCIPLINE[policy]
     tools = TOOL_SCHEMAS[policy]
@@ -197,11 +202,29 @@ def run_loop(
         if completion is not None:
             stop, blocks, usage = completion(model, system, messages, tools=tools)
         else:
-            stop, blocks, usage = run_turn(model, system, messages, tools=tools)
+            from model_runner import build_request, _urllib_transport
+
+            api_key = os.environ[provider_key_env(provider)]
+            if provider == "openrouter":
+                from model_runner import _openrouter_messages
+
+                wire = _openrouter_messages(messages)
+            else:
+                wire = messages
+            url, headers, body = build_request(
+                provider, model, system, wire, api_key, tools=tools, generation=generation
+            )
+            payload = _urllib_transport(url, headers, body)
+            stop, blocks, usage = parse_response(provider, payload, model_hint=model)
         usage_total["latency_s"] += time.monotonic() - started
         _add_usage(usage_total, usage)
         if usage is not None:
-            per_turn.append(billing_row(log.stem, log.stem, turns, usage, prices.cost(model, usage)))
+            try:
+                breakdown = prices.cost(model, usage)
+            except KeyError:
+                breakdown = None  # unknown model: raw usage preserved, $ deferred
+            if breakdown is not None:
+                per_turn.append(billing_row(log.stem, log.stem, turns, usage, breakdown))
         turns += 1
         calls = [b for b in blocks if b.get("type") == "tool_use"]
         if not calls or stop != "tool_use":
@@ -222,6 +245,8 @@ def run_loop(
         messages.append({"role": "user", "content": results})
     usage_total["turns"] = turns
     usage_total["model"] = model
+    usage_total["provider"] = provider
+    usage_total["price_table"] = price_note
     usage_total["usd"] = round(sum(row["cost_total_usd"] for row in per_turn), 6)
     if completion is None:  # real runs only; fake completions bill nothing
         log.parent.mkdir(parents=True, exist_ok=True)
@@ -238,9 +263,10 @@ def main() -> int:
     parser.add_argument("--log", type=Path, required=True)
     parser.add_argument("--policy", required=True, choices=sorted(DISCIPLINE))
     parser.add_argument("--instruction", required=True)
+    parser.add_argument("--provider", default="anthropic", choices=["anthropic", "openrouter"])
     parser.add_argument("--model", default="claude-sonnet-4-5")
     args = parser.parse_args()
-    summary = run_loop(args.root, args.log, args.policy, args.instruction, args.model)
+    summary = run_loop(args.root, args.log, args.policy, args.instruction, args.model, provider=args.provider)
     print(json.dumps(summary))
     return 0
 

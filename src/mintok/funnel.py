@@ -109,30 +109,52 @@ def slicer_promotion(
 # ---------------------------------------------------------------------------
 # Control-manifest guard: reuse frozen controls only when nothing that could
 # change their behavior differs. Matching tasks and token conventions is not
-# enough — provider, model, reasoning effort, system prompt, toolset, harness
-# version, and task-set hashes all have to agree.
+# enough — the exact effective generation configuration has to agree.
 # ---------------------------------------------------------------------------
 
 MANIFEST_FIELDS = (
     "provider",
+    "provider_api_version",
     "model",
     "reasoning_effort",
+    "temperature",
+    "top_p",
+    "max_output_tokens",
     "system_prompt_hash",
+    "agent_instruction_hash",
     "toolset_hash",
     "harness_version",
     "task_set_hash",
+    "repo_snapshot_hashes",
 )
 
 
 @dataclass(frozen=True, slots=True)
 class RunManifest:
+    """The exact effective generation configuration of one arm.
+
+    Every field must match for a frozen control to be reusable. Settings
+    a provider fixes are recorded as ``provider-fixed`` — never invented.
+    ``task_set_hash`` transitively binds per-task fingerprints (prompt,
+    checker, fixture contents); ``repo_snapshot_hashes`` carries the
+    starting repository trees; ``harness_version`` is the executing
+    commit (conservative: any repo change invalidates; replace with an
+    execution-critical file hash once the run settles).
+    """
+
     provider: str
-    model: str
-    reasoning_effort: str
-    system_prompt_hash: str
-    toolset_hash: str
-    harness_version: str
-    task_set_hash: str
+    provider_api_version: str = "provider-fixed"
+    model: str = ""
+    reasoning_effort: str = "none"
+    temperature: str = "0"
+    top_p: str = "provider-default"
+    max_output_tokens: str = "4096"
+    system_prompt_hash: str = ""
+    agent_instruction_hash: str = ""
+    toolset_hash: str = ""
+    harness_version: str = ""
+    task_set_hash: str = ""
+    repo_snapshot_hashes: str = ""
 
     def to_json(self) -> str:
         return json.dumps({f: getattr(self, f) for f in MANIFEST_FIELDS}, indent=2)
@@ -157,9 +179,17 @@ def manifests_compatible(frozen: RunManifest | None, live: RunManifest) -> tuple
 
 # ---------------------------------------------------------------------------
 # Failure attribution: why did a slicer task fail?
+#
+# DIAGNOSTIC, NOT CAUSAL GROUND TRUTH. The classes are evidence-based
+# labels for reading a run, not proven causes: e.g. a patch outside the
+# ranked slice does not prove the slice was bad — the agent may simply
+# have picked an unnecessary route. "Stochastic" is reserved for reruns
+# that demonstrate nondeterministic outcome changes; a suite-green/
+# checker-red run is recorded as checker_disagreement, which covers
+# stricter-than-suite checkers, hidden requirements, harness mismatch,
+# and genuine flakiness alike.
 # ---------------------------------------------------------------------------
 
-#: decision order encodes the cheapest-to-verify evidence first.
 def attribute_failure(
     *,
     solved: bool,
@@ -169,15 +199,7 @@ def attribute_failure(
     edit_rejections: int,
     suite_ok: bool,
 ) -> str:
-    """Classify one slicer-run failure from trajectory evidence.
-
-    Classes: ``bad_slice`` (the true working area was never in the package),
-    ``insufficient_slice`` (target present but content cut), ``fallback_needed``
-    (the agent had to leave the slice to make progress), ``edit_tool_limitation``
-    (the line-range patcher rejected the work), ``checker_stochastic`` (the
-    suite passed but the checker disagrees — flake or stochastic turn), and
-    ``agent_reasoning_failure`` (everything needed was available).
-    """
+    """Classify one slicer-run failure from trajectory evidence."""
     if solved:
         return ""
     if not target_in_slice:
@@ -189,7 +211,7 @@ def attribute_failure(
     if edit_rejections > 0:
         return "edit_tool_limitation"
     if suite_ok:
-        return "checker_stochastic"
+        return "checker_disagreement"
     return "agent_reasoning_failure"
 
 # ---------------------------------------------------------------------------

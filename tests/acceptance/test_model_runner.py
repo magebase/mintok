@@ -57,12 +57,12 @@ def fake_transport(ctx: SimpleNamespace) -> None:
 
 @given(parsers.parse('the model api key is set to "{key}"'))
 def set_api_key(ctx: SimpleNamespace, key: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(model_runner.API_KEY_ENV, key)
+    monkeypatch.setenv(model_runner.provider_key_env("anthropic"), key)
 
 
 @given("the model api key is unset")
 def unset_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(model_runner.API_KEY_ENV, raising=False)
+    monkeypatch.delenv(model_runner.provider_key_env("anthropic"), raising=False)
 
 
 @given("a transport that must never be called")
@@ -74,14 +74,14 @@ def forbidden_transport(ctx: SimpleNamespace) -> None:
 def build_request(ctx: SimpleNamespace, model: str, key: str) -> None:
     ctx.api_key = key
     ctx.url, ctx.headers, ctx.body_bytes = model_runner.build_request(
-        model, SYSTEM, MESSAGES, key
+        "anthropic", model, SYSTEM, MESSAGES, key
     )
     ctx.body = json.loads(ctx.body_bytes.decode("utf-8"))
 
 
 @when("the reply is parsed")
 def parse_reply(ctx: SimpleNamespace) -> None:
-    ctx.usage = model_runner.parse_response(ctx.reply)
+    ctx.usage = model_runner.parse_response("anthropic", ctx.reply)[2]
 
 
 @when(
@@ -91,6 +91,7 @@ def parse_reply(ctx: SimpleNamespace) -> None:
 )
 def run_completion(ctx: SimpleNamespace, system: str, word: str) -> None:
     ctx.text, ctx.usage = model_runner.run_completion(
+        "anthropic",
         "claude-sonnet-4-5",
         system,
         [{"role": "user", "content": f"Reply with {word}"}],
@@ -102,7 +103,7 @@ def run_completion(ctx: SimpleNamespace, system: str, word: str) -> None:
 def attempt_completion(ctx: SimpleNamespace) -> None:
     try:
         model_runner.run_completion(
-            "claude-sonnet-4-5", SYSTEM, MESSAGES, transport=ctx.transport
+            "anthropic", "claude-sonnet-4-5", SYSTEM, MESSAGES, transport=ctx.transport
         )
     except RuntimeError as error:
         ctx.error = error

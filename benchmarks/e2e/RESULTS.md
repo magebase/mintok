@@ -583,29 +583,43 @@ survives contact with an unseen instruction set.
 slice + bounded read + line-range patch + suite) runs on the same 15
 large-module tasks. Three safeguards gate the comparison:
 
-1. **Control-manifest guard.** Every arm records a manifest: provider,
-   model, reasoning effort, system-prompt hash, toolset hash, harness
-   version, task-set hash. The frozen control-eval trajectories are
+1. **Control-manifest guard.** Every arm records the exact effective
+   generation config: provider, API version, model snapshot id, reasoning
+   effort, temperature, top_p, max output tokens, system-prompt hash,
+   agent-instruction hash, tool-schema hash, harness version, task-set
+   hash (bound transitively to per-task fingerprints: prompt, checker,
+   fixture contents), and repo-snapshot hashes. Provider-fixed values
+   are recorded as such. The frozen control-eval trajectories are
    reused only on a full manifest match; the frozen eval predates
    manifests, so **the first promote-large run executes 15 fresh control
    trajectories too** (the mismatch branch is the honest default).
-   Manifests are written to `runs/<arm>.manifest.json` for all future
-   reuse decisions.
-2. **Provider billing telemetry.** The loop accumulates per-call usage
-   (input, cached input, cache writes, output, reasoning tokens where
-   exposed, latency) into `<log>.usage.json` plus a per-turn billing
-   JSONL priced through `mintok.billing.PriceTable` (list-price
-   snapshots; `MINTOK_PRICE_OVERRIDES` JSON overrides drift). Run
-   records carry real `frontier_usd`; **$/solved is the headline**, with
-   tool-context tokens as the comparable diagnostic.
-3. **Failure attribution.** Every failed slicer task is classified from
-   trajectory evidence (`mintok.funnel.attribute_failure`): `bad_slice`
-   (accepted patches never landed in a slice-ranked region),
-   `insufficient_slice` (expanded/truncated package),
-   `fallback_needed` (raw reads outspent the slice), 
-   `edit_tool_limitation` (patch rejections), `checker_stochastic`
-   (suite green, checker red), `agent_reasoning_failure` (everything
-   needed was available). The verdict line prints each failure's class.
+   Manifests land in `runs/<arm>.manifest.json` for all future reuse.
+   Harness identity is the executing commit for this run (conservative);
+   after the run settles it should become a hash of execution-critical
+   files only, so README edits stop invalidating controls.
+2. **Provider billing telemetry.** Providers: Anthropic
+   (`MINTOK_MODEL_API_KEY`) or OpenRouter (`OPENROUTER_API_KEY`, free
+   models available). The loop accumulates per-call usage (input, cached
+   input, cache writes, output, reasoning tokens where exposed,
+   latency) into `<log>.usage.json` — **raw usage is the immutable
+   evidence** — plus a per-turn billing JSONL priced through
+   `mintok.billing.PriceTable` (list-price snapshots, recorded with the
+   sidecar; `MINTOK_PRICE_OVERRIDES` JSON replaces them without
+   touching old trajectories). Run records carry real `frontier_usd`;
+   **$/solved and solve rate lead the report**, with p95/max $/task,
+   cache splits, and tool-context tokens as diagnostics.
+3. **Failure attribution (diagnostic, not causal ground truth).** Every
+   failed slicer task is classified from trajectory evidence
+   (`mintok.funnel.attribute_failure`): `bad_slice` (accepted patches
+   never landed in a slice-ranked region), `insufficient_slice`
+   (expanded/truncated package), `fallback_needed` (raw reads outspent
+   the slice), `edit_tool_limitation` (patch rejections),
+   `checker_disagreement` (suite green, checker red — could be a
+   stricter checker, a hidden requirement, a harness mismatch, or real
+   flakiness; "stochastic" is reserved for reruns demonstrating
+   nondeterministic outcome changes), and `agent_reasoning_failure`
+   (everything needed was available). Classes label runs for reading;
+   they do not assert causes.
 
 The promotion verdict (`mintok.funnel.slicer_promotion`) also records
 turns/attempt and the **slice acceptance rate** (solved tasks where the
@@ -613,3 +627,12 @@ slice stayed the dominant information channel). A 15/15 result with 12
 abandoned slices does not promote. The loop driver (`live.py`) is
 orchestrator-only: the shim log stays the exact record of tool-side
 context.
+
+**Run it:**
+
+```bash
+OPENROUTER_API_KEY=... uv run python run_bench.py promote-large \
+    --provider openrouter --model <free-model-id>
+# or paid frontier:
+MINTOK_MODEL_API_KEY=... uv run python run_bench.py promote-large
+```

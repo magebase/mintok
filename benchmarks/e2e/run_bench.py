@@ -526,7 +526,7 @@ def slice_cmd(task_id: str | None, eval_all: bool) -> None:
           "<=600 strong, <=400 excellent at control's solve rate")
 
 
-def promote_large(model: str, mock: bool = False) -> None:
+def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -> None:
     """Isolated live test: slicer arm vs control on the same 15 large tasks.
 
     Manifest guard: the frozen control-eval trajectories are reused ONLY
@@ -545,9 +545,11 @@ def promote_large(model: str, mock: bool = False) -> None:
         attribute_failure,
         manifests_compatible,
         slicer_promotion,
+        task_fingerprint,
     )
 
     from live import DISCIPLINE, TOOL_SCHEMAS, run_loop
+    from model_runner import GENERATION_DEFAULTS
 
     def fake_completion(model_name: str, system: str, messages: list, tools: list | None = None):
         """Scripted fake agent: primary tool, then suite, then stop."""
@@ -564,11 +566,25 @@ def promote_large(model: str, mock: bool = False) -> None:
 
     def arm_manifest(policy: str) -> RunManifest:
         prompt = DISCIPLINE[policy]
+        binding, repo_hashes = [], {}
+        for t in sorted(tasks, key=lambda t: t["id"]):
+            fp = task_fingerprint(t, FIXTURES / t["repo"])
+            binding.append(f"{t['id']}:{fp['prompt_hash']}:{fp['checker_hash']}:{fp.get('fixture_hash', '')}")
+            repo_hashes[t["repo"]] = fp.get("fixture_hash", "")
         return RunManifest(
-            provider="anthropic",
+            provider=provider,
+            provider_api_version=(
+                "openrouter/v1 (provider-fixed)" if provider == "openrouter" else "anthropic 2023-06-01"
+            ),
             model=model,
             reasoning_effort=os.environ.get("MINTOK_REASONING_EFFORT", "none"),
+            temperature=str(GENERATION_DEFAULTS["temperature"]),
+            top_p=str(GENERATION_DEFAULTS["top_p"]),
+            max_output_tokens=str(GENERATION_DEFAULTS["max_output_tokens"]),
             system_prompt_hash=hashlib.sha256(prompt.encode()).hexdigest()[:16],
+            agent_instruction_hash=hashlib.sha256(
+                b"task instruction delivered verbatim as the first user message"
+            ).hexdigest()[:16],
             toolset_hash=hashlib.sha256(
                 json.dumps(TOOL_SCHEMAS[policy], sort_keys=True).encode()
             ).hexdigest()[:16],
@@ -576,7 +592,8 @@ def promote_large(model: str, mock: bool = False) -> None:
                 ["git", "rev-parse", "--short", "HEAD"],
                 cwd=HARNESS_ROOT, capture_output=True, text=True,
             ).stdout.strip(),
-            task_set_hash=hashlib.sha256(TASKS_JSON.read_bytes()).hexdigest()[:16],
+            task_set_hash=hashlib.sha256("\n".join(binding).encode()).hexdigest()[:16],
+            repo_snapshot_hashes=",".join(f"{k}:{v}" for k, v in sorted(repo_hashes.items())),
         )
 
     tasks = [t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"]
@@ -608,6 +625,7 @@ def promote_large(model: str, mock: bool = False) -> None:
         run_loop(
             copy, log, "S", task["instruction"], model,
             completion=fake_completion if mock else None,
+            provider=provider,
         )
         check(copy, task_id, log)
 
@@ -668,6 +686,7 @@ def promote_large(model: str, mock: bool = False) -> None:
             run_loop(
                 ccopy, clog, "control", task["instruction"], model,
                 completion=fake_completion if mock else None,
+                provider=provider,
             )
             check(ccopy, task_id, clog)
             if not mock:
@@ -677,6 +696,7 @@ def promote_large(model: str, mock: bool = False) -> None:
             control_rows[task_id] = {
                 "solved": cscore["solved"],
                 "input_tokens": cscore["tool_output_tokens"] + prompt_tokens,
+                "turns": cscore["turns"],
                 "frontier_usd": json.loads(cusage_path.read_text())["usd"] if cusage_path.exists() else 0.0,
             }
 
@@ -694,24 +714,69 @@ def promote_large(model: str, mock: bool = False) -> None:
 
     rep = slicer_promotion(runs, solve_target=len(tasks))
     ctrl_solved = sum(control_rows[r.task_id]["solved"] for r in runs)
-    ctrl_tok = sum(control_rows[r.task_id]["input_tokens"] for r in runs)
-    slicer_usd = 0.0
-    for r in runs:
-        upath = scratch / "logs" / f"{r.task_id}-slicer.usage.json"
-        if upath.exists():
-            slicer_usd += json.loads(upath.read_text())["usd"]
+
+    def usage_rows(prefix: str) -> list[dict]:
+        rows = []
+        for r in runs:
+            upath = scratch / "logs" / f"{r.task_id}-{prefix}.usage.json"
+            rows.append(json.loads(upath.read_text()) if upath.exists() else {})
+        return rows
+
+    slicer_usage = usage_rows("slicer")
+    control_usage = usage_rows("control") if control_arm == "control-large" else []
+
+    def tok_sum(rows: list[dict], key: str) -> int:
+        return sum(u.get(key, 0) for u in rows)
+
+    slicer_usd_total = sum(u.get("usd", 0.0) for u in slicer_usage)
+    control_usd_total = sum(u.get("usd", 0.0) for u in control_usage)
+    slicer_usd_per_task = sorted(u.get("usd", 0.0) for u in slicer_usage)
+    control_usd_per_task = sorted(u.get("usd", 0.0) for u in control_usage)
+    slicer_solved_tok = sum(r.tokens for r in runs if r.solved)
+    control_solved_tok = sum(control_rows[r.task_id]["input_tokens"] for r in runs if control_rows[r.task_id]["solved"])
     label = "DRY RUN (mock model — plumbing only, verdict not meaningful)" if mock else "live"
     print(f"\nslicer promotion ({rep.attempted} large-module tasks, {label}) vs {control_arm}:")
-    print(f"  slicer:  solved {rep.solved}/{rep.attempted}, tok/solved {rep.tokens_per_solved:.0f}, "
-          f"turns/attempt {rep.turns_per_attempt:.1f}, p95 {rep.p95_tokens}, max {rep.max_tokens}, "
-          f"${slicer_usd:.4f} total" + (f" (${slicer_usd / rep.solved:.4f}/solved)" if rep.solved else ""))
-    print(f"  control: solved {ctrl_solved}/{rep.attempted}, tok/attempt {ctrl_tok / rep.attempted:.0f}")
-    print(f"  slice acceptance {rep.acceptance_rate:.2f}, raw-fallback rate {rep.fallback_rate:.2f}, "
-          f"expanded-slice rate {rep.expanded_rate:.2f}")
-    if control_arm == "control-large" and not mock:
-        c_usd = sum(r.get("frontier_usd", 0.0) for r in control_rows.values())
-        if rep.solved and ctrl_solved:
-            print(f"  $/solved: slicer ${slicer_usd / rep.solved:.4f} vs control ${c_usd / ctrl_solved:.4f}")
+    hdr = f"  {'metric':<22}{'control':>16}{'slicer':>16}{'delta':>10}"
+    print(hdr)
+
+    def row(name: str, c, s, fmt: str = "{:.4f}") -> None:
+        def cell(v) -> str:
+            if v is None:
+                return "—"
+            return fmt.format(v) if isinstance(v, (int, float)) else str(v)
+
+        delta = f"{(s / c if c else 0):.2f}x" if isinstance(c, (int, float)) and c and isinstance(s, (int, float)) else "-"
+        print(f"  {name:<22}{cell(c):>16}{cell(s):>16}{delta:>10}")
+
+    control_turns = sum(control_rows[r.task_id].get("turns", 0) for r in runs)
+    row("solved", ctrl_solved, rep.solved, "{:d}")
+    row(
+        "$/solved",
+        (control_usd_total / ctrl_solved) if ctrl_solved and control_usage else None,
+        (slicer_usd_total / rep.solved) if rep.solved else None,
+    )
+    row("total api $", control_usd_total or None, slicer_usd_total or None)
+    row("input tokens", tok_sum(control_usage, "input_tokens") or None, tok_sum(slicer_usage, "input_tokens") or None, "{:d}")
+    row("cache reads", tok_sum(control_usage, "cached_input_tokens") or None, tok_sum(slicer_usage, "cached_input_tokens") or None, "{:d}")
+    row("cache writes", tok_sum(control_usage, "cache_write_tokens") or None, tok_sum(slicer_usage, "cache_write_tokens") or None, "{:d}")
+    row("output tokens", tok_sum(control_usage, "output_tokens") or None, tok_sum(slicer_usage, "output_tokens") or None, "{:d}")
+    row("reasoning tokens", tok_sum(control_usage, "reasoning_tokens") or None, tok_sum(slicer_usage, "reasoning_tokens") or None, "{:d}")
+    row("turns/task", (control_turns / rep.attempted) if control_usage else None,
+        rep.turns_per_attempt, "{:.1f}")
+    row(
+        "tool-context/solved",
+        (control_solved_tok / ctrl_solved) if ctrl_solved else None,
+        (slicer_solved_tok / rep.solved) if rep.solved else None,
+        "{:.0f}",
+    )
+    print(f"  {'slice acceptance':<22}{'-':>16}{rep.acceptance_rate:>16.2f}")
+    print(f"  {'raw fallback rate':<22}{'-':>16}{rep.fallback_rate:>16.2f}")
+    print(f"  {'expanded slices':<22}{'-':>16}{rep.expanded_rate:>16.2f}")
+    if slicer_usd_per_task and any(slicer_usd_per_task):
+        n9 = max(1, math.ceil(0.95 * len(slicer_usd_per_task))) - 1
+        c_n9 = max(1, math.ceil(0.95 * len(control_usd_per_task))) - 1 if control_usd_per_task else 0
+        row("p95 $/task", control_usd_per_task[c_n9] if control_usage else None, slicer_usd_per_task[n9])
+        row("max $/task", max(control_usd_per_task) if control_usage else None, max(slicer_usd_per_task))
     print(f"  VERDICT: {rep.verdict.upper()} (bar: solve >= {len(tasks)}/15, "
           f"<=800 promote / <=600 strong / <=400 excellent)")
 

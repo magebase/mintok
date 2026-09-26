@@ -1,9 +1,15 @@
 {
   "provider": "anthropic",
+  "provider_api_version": "anthropic 2023-06-01",
   "model": "claude-sonnet-4-5",
   "reasoning_effort": "none",
+  "temperature": "0.0",
+  "top_p": "provider-default",
+  "max_output_tokens": "4096",
   "system_prompt_hash": "32182dcd8d2e494f",
+  "agent_instruction_hash": "062102fbcafd1276",
   "toolset_hash": "adb3f8eebe8e44d7",
-  "harness_version": "841908c",
-  "task_set_hash": "042c4e5786e5efa6"
+  "harness_version": "8dd57bc",
+  "task_set_hash": "c35f14258ef0c70b",
+  "repo_snapshot_hashes": "biglib:1ef48d9f4056eaf64d12f5b5c2e020dd"
 }

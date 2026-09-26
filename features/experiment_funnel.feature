@@ -132,5 +132,5 @@ Feature: Experiment funnel
       | yes    | no        | yes       | 0       | no    | insufficient_slice    |
       | yes    | no        | no        | 0       | no    | fallback_needed       |
       | yes    | yes       | no        | 3       | no    | edit_tool_limitation  |
-      | yes    | yes       | no        | 0       | yes   | checker_stochastic    |
+      | yes    | yes       | no        | 0       | yes   | checker_disagreement  |
       | yes    | yes       | no        | 0       | no    | agent_reasoning_failure |
