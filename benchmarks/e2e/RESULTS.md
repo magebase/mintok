@@ -636,3 +636,47 @@ OPENROUTER_API_KEY=... uv run python run_bench.py promote-large \
 # or paid frontier:
 MINTOK_MODEL_API_KEY=... uv run python run_bench.py promote-large
 ```
+
+### Stage-1 result (30 live trajectories, stealth/space-bunny-alpha, free)
+
+First real-model run of the isolated promotion test: 15 slicer + 15 fresh
+control (manifest guard fired; frozen eval predates manifests). A first
+pilot on a weaker free model (nemotron-3-super) solved 0/15 in both arms
+and was archived (`/home/aqua/bench-run/nemotron-pilot/`), then the run
+was repeated on a stronger one — the two-model pattern is itself
+evidence for the structural-transfer thesis.
+
+| metric | control | slicer | delta |
+|---|---|---|---|
+| solved | 1/15 | 1/15 | 1.00x |
+| input tokens, total | ~133,600 | 84,893 | **4.7x less** |
+| input tokens, median/task | 13,575 | 1,683 | **8.1x less** |
+| cache reads (slicer) | — | 409,811 | |
+| output tokens (slicer) | — | 37,710 | |
+| turns/task | 10.7 | 10.0 | 0.94x |
+| slice acceptance / fallback / expanded | — | 0.00 / 0.07 / 0.13 | |
+
+**VERDICT: REJECT** (pre-registered bar: solve ≥ 15/15). Per the
+decision rule, no paid Stage-2 frontier calibration yet.
+
+What the data says:
+
+- **Structural savings transferred.** A second, unrelated model shows
+  the same ~5–8x provider-token gap at equal solve rate. The savings
+  live in the software representation, not the model.
+- **Behavioral savings did not.** Failure attribution is dominated by
+  `fallback_needed`: after the slice, this model reads past it and then
+  patches blind in loops (worst: 17 patches + 12 reads, suite never run,
+  151k provider tokens on one task). One `checker_disagreement`
+  (suite green, checker red — correctly not labeled stochastic).
+- **Diagnosis queue** (before any rerun): (1) verify-then-stop
+  discipline in the loop driver — a trajectory that never runs `suite`
+  should be steered back, not cut off at the turn cap; (2) the 13%
+  expanded-slice rate says the 800-token initial budget is tight on
+  class-level targets — the fix is member-method slicing (already
+  noted), not a budget raise; (3) slice acceptance must be measured on
+  more than one solve before it means anything.
+
+The $-denominated claim remains blocked on a nonzero-priced model (both
+arms $0.00 here); provider tokens/solved is the Stage-1 headline by
+pre-decision.
