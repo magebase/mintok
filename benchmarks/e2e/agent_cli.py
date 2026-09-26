@@ -23,6 +23,7 @@ rejected, shell is unlocked and the downside vs control is bounded.
 
 Subcommands:
   shell "CMD"            run CMD (shell) in the task root (policy-gated)
+  slice DESCRIPTION      ranked exact source regions under a budget (arm S)
   query OP TARGET        ABI query (find|symbol|effects|callers|writers|summary|inspect)
   inspect TARGET         batched bundle for a known symbol
   packet DESCRIPTION     local planner: resolve + full change bundle
@@ -49,6 +50,7 @@ sys.path.insert(0, str(HARNESS_ROOT / "src"))
 
 from mintok.abi import AgentABI  # noqa: E402
 from mintok.continuity import LearnedState, file_digests  # noqa: E402
+from mintok.slicer import INITIAL_BUDGET as INITIAL_SLICE_BUDGET  # noqa: E402
 from mintok.tokens import estimate_tokens  # noqa: E402
 
 VENV_PY = HARNESS_ROOT / ".venv" / "bin" / "python"
@@ -120,6 +122,14 @@ POLICIES: dict[str, dict] = {
         "breaker": False,
         "continuity": True,
     },
+    # S: large-module slice backend. Intelligence is local: ranked exact
+    # source regions under a hard budget. Bounded raw reads are the tracked
+    # fallback; edits are line-range patches over the slice's coordinates.
+    "S": {
+        "tools": {"slice", "read", "patch", "suite"},
+        "ops": set(),
+        "breaker": False,
+    },
 }
 
 
@@ -171,7 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--policy",
         default="control",
-        help="arm policy gating the tool surface (control|mintok|B|C|D|E|F|G|H|I|J|K)",
+        help="arm policy gating the tool surface (control|mintok|B|C|D|E|F|G|H|I|J|K|S)",
     )
     sub = parser.add_subparsers(dest="tool", required=True)
 
@@ -236,6 +246,9 @@ def main(argv: list[str] | None = None) -> int:
 
     suite = sub.add_parser("suite", help="run the task copy's full test suite")
     suite.add_argument("--quiet", action="store_true")
+
+    slc = sub.add_parser("slice", help="ranked exact source regions for a task description (arm S)")
+    slc.add_argument("description", help="what to find/change, in task words")
 
     args = parser.parse_args(argv)
     policy = POLICIES.get(args.policy)
@@ -471,6 +484,21 @@ def main(argv: list[str] | None = None) -> int:
             timeout=600,
         )
         return finish((proc.stdout + proc.stderr).rstrip(), proc.returncode)
+
+    if args.tool == "slice":
+        entry["args"] = args.description
+        if "slice" not in policy["tools"]:
+            return finish(f"locked: tool 'slice' not in policy {args.policy}", 3)
+        try:
+            from mintok.slicer import slice_task
+
+            pkg = slice_task(args.root, args.description)
+        except Exception as exc:  # noqa: BLE001 - the agent sees the failure
+            return finish(f"error: {exc}", 1)
+        entry["package_tokens"] = pkg.tokens
+        entry["budget"] = pkg.budget
+        entry["expanded"] = pkg.budget > INITIAL_SLICE_BUDGET
+        return finish(pkg.text, 0)
 
     if args.tool == "verify":
         entry["args"] = " ".join(args.argv)

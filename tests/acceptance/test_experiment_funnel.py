@@ -10,6 +10,7 @@ from mintok.funnel import (
     AdaptivePool,
     ControlCache,
     PairedOutcome,
+    SlicerRun,
     TaskIntegrityError,
     control_key,
     fast8_classes,
@@ -17,6 +18,7 @@ from mintok.funnel import (
     next_phase,
     phase_suite,
     sequential_verdict,
+    slicer_promotion,
     task_fingerprint,
     verify_fingerprint,
 )
@@ -241,3 +243,46 @@ def phase_is(ctx: SimpleNamespace, phase: str) -> None:
         return
     current, killed = mapping[ctx.history]
     assert next_phase(current, killed) == phase
+
+
+@given("slicer runs on 15 large-module tasks:")
+def slicer_runs(ctx: SimpleNamespace, datatable: list[list[str]]) -> None:
+    from tests.acceptance.helpers import table_rows
+
+    ctx.slicer_runs = [
+        SlicerRun(
+            task_id=row["task"],
+            solved=row["solved"] == "yes",
+            tokens=int(row["tokens"]),
+            turns=int(row["turns"]),
+            slice_tokens=int(row["slice_tok"]),
+            fallback_tokens=int(row["fallback_tok"]),
+            expanded=row["expanded"] == "yes",
+        )
+        for row in table_rows(datatable)
+    ]
+
+
+@when(parsers.parse("the slicer promotion verdict is computed with solve target {target:d}"))
+def compute_promotion(ctx: SimpleNamespace, target: int) -> None:
+    ctx.promotion = slicer_promotion(ctx.slicer_runs, solve_target=target)
+
+
+@then(parsers.parse('the verdict is "{verdict}"'))
+def promotion_verdict(ctx: SimpleNamespace, verdict: str) -> None:
+    assert ctx.promotion.verdict == verdict, ctx.promotion
+
+
+@then(parsers.parse("the slice acceptance rate is {value:f}"))
+def acceptance_rate(ctx: SimpleNamespace, value: float) -> None:
+    assert round(ctx.promotion.acceptance_rate, 2) == value, ctx.promotion
+
+
+@then(parsers.parse("the raw-source fallback rate is {value:f}"))
+def fallback_rate(ctx: SimpleNamespace, value: float) -> None:
+    assert round(ctx.promotion.fallback_rate, 2) == value, ctx.promotion
+
+
+@then(parsers.parse("the expanded-slice rate is {value:f}"))
+def expanded_rate(ctx: SimpleNamespace, value: float) -> None:
+    assert round(ctx.promotion.expanded_rate, 2) == value, ctx.promotion

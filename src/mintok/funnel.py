@@ -28,6 +28,86 @@ from pathlib import Path
 from typing import Iterable, Mapping
 
 # ---------------------------------------------------------------------------
+# Slicer promotion: the pre-registered bar for the third backend
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class SlicerRun:
+    """One live slicer trajectory, summarized."""
+
+    task_id: str
+    solved: bool
+    tokens: int  # tool-context tokens, same convention as run records
+    turns: int
+    slice_tokens: int  # output tokens delivered by the slice tool
+    fallback_tokens: int  # output tokens from raw-source reads
+    expanded: bool  # slice needed the expanded budget
+
+
+@dataclass(frozen=True, slots=True)
+class SlicerPromotion:
+    verdict: str  # excellent | strong | promote | reject
+    solved: int
+    attempted: int
+    tokens_per_solved: float
+    acceptance_rate: float  # solved without the slice being abandoned
+    fallback_rate: float  # tasks where raw reads dominated the slice
+    expanded_rate: float
+    turns_per_attempt: float
+    p95_tokens: int
+    max_tokens: int
+
+
+def slicer_promotion(
+    runs: Iterable[SlicerRun],
+    solve_target: int,
+    bar_good: int = 800,
+    bar_strong: int = 600,
+    bar_excellent: int = 400,
+) -> SlicerPromotion:
+    """Verdict against the frozen promotion bar.
+
+    Slice acceptance: among *solved* tasks, the share where the slice
+    stayed the dominant information channel (raw-source fallback did not
+    outspend it). A solved-but-abandoned slice does not credit the
+    representation; the fallback rate counts abandoned tasks over all
+    attempts.
+    """
+    runs = list(runs)
+    attempted = len(runs)
+    solved = sum(r.solved for r in runs)
+    solved_rows = [r for r in runs if r.solved]
+    accepted = sum(1 for r in solved_rows if r.slice_tokens >= r.fallback_tokens)
+    abandoned_solved = sum(1 for r in solved_rows if r.fallback_tokens > r.slice_tokens)
+    toks = sorted(r.tokens for r in runs)
+
+    def pct(p: float) -> int:
+        return toks[min(len(toks) - 1, math.ceil(p * len(toks)) - 1)]
+
+    tokens_per_solved = sum(r.tokens for r in solved_rows) / solved if solved else float("inf")
+    if solved < solve_target or tokens_per_solved > bar_good:
+        verdict = "reject"
+    elif tokens_per_solved <= bar_excellent:
+        verdict = "excellent"
+    elif tokens_per_solved <= bar_strong:
+        verdict = "strong"
+    else:
+        verdict = "promote"
+    return SlicerPromotion(
+        verdict=verdict,
+        solved=solved,
+        attempted=attempted,
+        tokens_per_solved=tokens_per_solved,
+        acceptance_rate=accepted / solved if solved else 0.0,
+        fallback_rate=abandoned_solved / attempted if attempted else 0.0,
+        expanded_rate=sum(r.expanded for r in runs) / attempted if attempted else 0.0,
+        turns_per_attempt=sum(r.turns for r in runs) / attempted if attempted else 0.0,
+        p95_tokens=pct(0.95) if toks else 0,
+        max_tokens=max(toks) if toks else 0,
+    )
+
+# ---------------------------------------------------------------------------
 # FAST-8: the high-information smoke suite
 # ---------------------------------------------------------------------------
 

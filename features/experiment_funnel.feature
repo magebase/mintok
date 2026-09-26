@@ -82,3 +82,27 @@ Feature: Experiment funnel
       | smoke8_killed      | dead        |
       | dev15_killed       | dead        |
       | confirm30_killed   | dead        |
+
+  Scenario: Slicer promotion verdict from measured trajectories
+    Given slicer runs on 15 large-module tasks:
+      | task | solved | tokens | turns | slice_tok | fallback_tok | expanded |
+      | t1   | yes    | 700    | 4     | 300       | 200          | no       |
+      | t2   | yes    | 900    | 5     | 250       | 400          | no       |
+      | t3   | yes    | 600    | 3     | 350       | 100          | no       |
+      | t4   | no     | 2100   | 12    | 400       | 1500         | yes      |
+      | t5   | yes    | 500    | 4     | 300       | 100          | no       |
+    When the slicer promotion verdict is computed with solve target 4
+    Then the verdict is "promote"
+    And the slice acceptance rate is 0.75
+    And the raw-source fallback rate is 0.2
+    And the expanded-slice rate is 0.2
+
+  Scenario: A slicer that reads the file conventionally does not promote
+    Given slicer runs on 15 large-module tasks:
+      | task | solved | tokens | turns | slice_tok | fallback_tok | expanded |
+      | t1   | yes    | 2400   | 8     | 300       | 1900         | no       |
+      | t2   | yes    | 2600   | 9     | 300       | 2100         | no       |
+      | t3   | yes    | 2200   | 7     | 300       | 1700         | no       |
+      | t4   | yes    | 2500   | 8     | 300       | 2000         | no       |
+    When the slicer promotion verdict is computed with solve target 4
+    Then the verdict is "reject"

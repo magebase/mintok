@@ -578,3 +578,16 @@ next benchmark after slicer tuning must be a genuinely fresh holdout
 distribution, snapshots, checkers, router rules, and model config frozen
 before the run; that result decides whether the 1.4x routing claim
 survives contact with an unseen instruction set.
+
+**Isolated live test** (`promote-large`): the slicer arm (policy S:
+slice + bounded read + line-range patch + suite) runs on the same 15
+large-module tasks with the frozen control-eval trajectories reused as
+the control arm — a clean causal comparison with only 15 live runs. The
+promotion verdict (`mintok.funnel.slicer_promotion`) is computed from
+measured trajectories against the pre-registered bar and additionally
+records turns/attempt, **slice acceptance rate** (solved tasks where the
+slice stayed the dominant information channel — raw fallback did not
+outspend it), raw-source fallback rate, and expanded-slice rate. A
+15/15 result with 12 abandoned slices does not promote. The loop driver
+(`live.py`) is orchestrator-only: the shim log stays the exact record of
+tool-side context.

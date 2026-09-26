@@ -31,6 +31,10 @@ Subcommands:
                                      pre-flight info and report package tokens vs the
                                      arms' actual tool-context (sizing only — not a
                                      solve prediction; the oracle waits for real runs)
+  promote-large                      ISOLATED live test on the 15 large-module tasks:
+                                     slicer arm (policy S) vs the frozen control-eval
+                                     trajectories, scored against the pre-registered
+                                     promotion bar. Requires MINTOK_MODEL_API_KEY.
 """
 
 from __future__ import annotations
@@ -519,6 +523,72 @@ def slice_cmd(task_id: str | None, eval_all: bool) -> None:
           "<=600 strong, <=400 excellent at control's solve rate")
 
 
+def promote_large(model: str) -> None:
+    """Isolated live test: slicer arm vs the frozen control-eval trajectories.
+
+    Clean causal comparison on the same 15 large-module tasks: the control
+    arm's trajectories already exist from the frozen eval, so only the
+    slicer arm runs live. Verdict against the pre-registered bar.
+    """
+    import tempfile
+
+    from mintok.funnel import SlicerRun, slicer_promotion
+
+    from live import run_loop
+
+    tasks = [t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"]
+    scratch = Path("/home/aqua/bench-run")
+    scratch.mkdir(parents=True, exist_ok=True)
+    runs: list[SlicerRun] = []
+    for task in tasks:
+        task_id = task["id"]
+        copy = scratch / "copies" / f"{task_id}-slicer"
+        prepare(copy, task_id)
+        log = scratch / "logs" / f"{task_id}-slicer.jsonl"
+        summary = run_loop(copy, log, "S", task["instruction"], model)
+        task_root = Path(tempfile.mkdtemp())  # checker needs the edited copy
+        shutil.copytree(copy, task_root, dirs_exist_ok=True)
+        check(task_root, task_id, log)
+
+        entries = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
+        slice_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "slice")
+        fallback_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "read")
+        score = json.loads((log.parent / f"{log.stem}.score.json").read_text())
+        prompt_tokens = estimate_tokens(task["instruction"]) + PROMPT_OVERHEAD_TOKENS
+        runs.append(
+            SlicerRun(
+                task_id=task_id,
+                solved=score["solved"],
+                tokens=score["tool_output_tokens"] + prompt_tokens,
+                turns=score["turns"],
+                slice_tokens=slice_tok,
+                fallback_tokens=fallback_tok,
+                expanded=any(e.get("expanded") for e in entries),
+            )
+        )
+        record("slicer-large", task_id, log)
+        print(f"{task_id}: solved={runs[-1].solved} tokens={runs[-1].tokens} turns={runs[-1].turns}")
+
+    control = {
+        json.loads(l)["task_id"]: json.loads(l)
+        for l in (RUNS_DIR / "control-eval.jsonl").read_text().splitlines()
+        if l.strip()
+    }
+    report_rows = list(runs)
+    rep = slicer_promotion(runs, solve_target=len(tasks))
+    ctrl_solved = sum(control[r.task_id]["solved"] for r in runs)
+    ctrl_tok = sum(control[r.task_id]["input_tokens"] for r in runs if r.solved)
+    print(f"\nslicer promotion ({rep.attempted} large-module tasks, live) vs frozen control-eval:")
+    print(f"  slicer:  solved {rep.solved}/{rep.attempted}, tok/solved {rep.tokens_per_solved:.0f}, "
+          f"turns/attempt {rep.turns_per_attempt:.1f}, p95 {rep.p95_tokens}, max {rep.max_tokens}")
+    print(f"  control: solved {ctrl_solved}/{rep.attempted}, tok/solved "
+          f"{ctrl_tok / ctrl_solved if ctrl_solved else float('inf'):.0f}")
+    print(f"  slice acceptance {rep.acceptance_rate:.2f}, raw-fallback rate {rep.fallback_rate:.2f}, "
+          f"expanded-slice rate {rep.expanded_rate:.2f}")
+    print(f"  VERDICT: {rep.verdict.upper()} (bar: solve >= {len(tasks)}/15, "
+          f"<=800 promote / <=600 strong / <=400 excellent)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="e2e")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -563,6 +633,9 @@ def main() -> None:
     slc.add_argument("--task", default=None)
     slc.add_argument("--eval", action="store_true")
 
+    prm = sub.add_parser("promote-large")
+    prm.add_argument("--model", default="claude-sonnet-4-5")
+
     args = parser.parse_args()
     if args.cmd == "prepare":
         prepare(args.dest, args.task)
@@ -584,6 +657,8 @@ def main() -> None:
         route_cmd(args.task, args.eval)
     elif args.cmd == "slice":
         slice_cmd(args.task, args.eval)
+    elif args.cmd == "promote-large":
+        promote_large(args.model)
     else:
         report()
 

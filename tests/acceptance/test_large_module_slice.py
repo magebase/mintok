@@ -109,3 +109,52 @@ def no_prose(ctx: SimpleNamespace) -> None:
         assert line in {f"{s}:" for s in (
             "target candidates", "relevant callers", "relevant writes", "relevant tests",
         )} or line.startswith("  "), line
+
+
+@pytest.mark.integration
+def test_live_loop_drives_slice_through_the_shim(tmp_path):
+    """The loop executes tool calls through the shim and stops on a final answer."""
+    import importlib.util
+    import json
+    from pathlib import Path as _Path
+
+    root = tmp_path / "repo"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "big.py").write_text(
+        "def parse_options(opts):\n    return opts\n"
+    )
+    log = tmp_path / "t.jsonl"
+
+    live_path = _Path(__file__).resolve().parents[2] / "benchmarks" / "e2e" / "live.py"
+    spec = importlib.util.spec_from_file_location("live", live_path)
+    live = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(live)
+
+    replies = iter(
+        [
+            (
+                "tool_use",
+                [
+                    {
+                        "type": "tool_use",
+                        "id": "t1",
+                        "name": "slice",
+                        "input": {"description": "parse_options must reject empty opts"},
+                    }
+                ],
+                None,
+            ),
+            ("end_turn", [{"type": "text", "text": "done"}], None),
+        ]
+    )
+
+    def fake_completion(model, system, messages, tools=None):
+        return next(replies)
+
+    summary = live.run_loop(
+        root, log, "S", "parse_options must reject empty opts", "fake", completion=fake_completion
+    )
+    entries = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+    assert summary["completed"] and summary["turns"] == 2, summary
+    assert [e["tool"] for e in entries] == ["slice"]
+    assert entries[0]["package_tokens"] > 0

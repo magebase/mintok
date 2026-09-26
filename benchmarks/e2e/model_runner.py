@@ -36,6 +36,7 @@ def build_request(
     messages: list[dict[str, Any]],
     api_key: str,
     base_url: str | None = None,
+    tools: list[dict[str, Any]] | None = None,
 ) -> tuple[str, dict[str, str], bytes]:
     """Build the URL, headers, and JSON body for one Messages API call.
 
@@ -48,7 +49,7 @@ def build_request(
         "x-api-key": api_key,
         "anthropic-version": ANTHROPIC_VERSION,
     }
-    body = {
+    body: dict[str, Any] = {
         "model": model,
         "max_tokens": DEFAULT_MAX_TOKENS,
         "system": [
@@ -60,7 +61,19 @@ def build_request(
         ],
         "messages": messages,
     }
+    if tools:
+        body["tools"] = tools
     return url, headers, json.dumps(body).encode("utf-8")
+
+
+def parse_blocks(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Content blocks of a reply: text plus tool_use blocks."""
+    return list(payload.get("content", []))
+
+
+def tool_uses(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The tool_invocation blocks a reply requests."""
+    return [b for b in blocks if b.get("type") == "tool_use"]
 
 
 def parse_response(payload: dict[str, Any]) -> UsageRecord:
@@ -81,6 +94,7 @@ def run_completion(
     messages: list[dict[str, Any]],
     *,
     transport: Transport | None = None,
+    tools: list[dict[str, Any]] | None = None,
 ) -> tuple[str, UsageRecord]:
     """Run one completion and return ``(text, UsageRecord)``.
 
@@ -92,12 +106,31 @@ def run_completion(
         raise RuntimeError(f"{API_KEY_ENV} not set")
     if transport is None:
         transport = _urllib_transport
-    url, headers, body = build_request(model, system, messages, api_key)
+    url, headers, body = build_request(model, system, messages, api_key, tools=tools)
     payload = transport(url, headers, body)
     text = "".join(
         block.get("text", "") for block in payload.get("content", []) if block.get("type") == "text"
     )
     return text, parse_response(payload)
+
+
+def run_turn(
+    model: str,
+    system: str,
+    messages: list[dict[str, Any]],
+    *,
+    transport: Transport | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> tuple[str, list[dict[str, Any]], UsageRecord]:
+    """One agent turn: returns (stop_reason, content blocks, usage)."""
+    api_key = os.environ.get(API_KEY_ENV)
+    if not api_key:
+        raise RuntimeError(f"{API_KEY_ENV} not set")
+    if transport is None:
+        transport = _urllib_transport
+    url, headers, body = build_request(model, system, messages, api_key, tools=tools)
+    payload = transport(url, headers, body)
+    return payload.get("stop_reason", ""), parse_blocks(payload), parse_response(payload)
 
 
 def _urllib_transport(url: str, headers: dict[str, str], body: bytes) -> dict[str, Any]:
