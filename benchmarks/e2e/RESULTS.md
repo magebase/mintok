@@ -254,3 +254,43 @@ H 0.62x, I 0.73x, J 0.69x, E 0.54x, F 0.42x, G 0.42x
 
 The three V3 mechanisms stay in the codebase behind policies (H/I/J) with
 scenario coverage; none is promoted to the default. Default remains **C**.
+
+## V3 follow-up: arm K (transparent semantic continuity)
+
+**Setup.** Arm K reuses C's exact agent-facing surface (same tools, same ops,
+identical prompts — verbatim canonical text). The only difference is invisible
+to the agent: the shim maintains a persistent learned-state file
+(`<log-stem>.state.json`, from `src/mintok/continuity.py`). After every write,
+subsequent `query` responses on already-learned symbols/relations are prefixed
+with a hash-based verdict ("X unchanged since learn #N", "interface unchanged
+since learn #N; body changed", "removed") instead of forcing a full re-show.
+No `check_hash`/`should_relearn` calls are exposed; the agent never sees the
+mechanism.
+
+**Results (30 tasks):**
+
+| arm | tasks | solved | solve % | turns | tok/att | paired geomean vs control |
+|---|---|---|---|---|---|---|
+| K | 30 | 29 | 97% | 8.3 | 2,742 | 0.70x |
+
+**Findings**
+
+1. **Solve rate unchanged (29/30).** `new-pack-is-empty` failed again — its
+   tenth consecutive failure across all arms; the trap is arm-independent.
+2. **Average tokens regressed (2,742 vs C's 1,753).** Verdict lines add a
+   per-response marker even when the agent was about to act anyway, and two
+   tasks ballooned (`comment-skipdirs` 16,794; `behavior-find-casesensitive`
+   10,530 at 42 turns) from agent variance, not from the mechanism.
+3. **Coverage was low.** Continuity verdicts appeared in only 12/30 logs.
+   Agents frequently bypass `query` for `read` + shell grep/sed, so the
+   lever only pays when agents actually re-query learned symbols. Where
+   verdicts fired (e.g. `rename-*` family), per-task tokens were at or below
+   C's levels (652, 468, 526, 619 vs C's 753, 471, 452, 576).
+4. **Verdict:** K is not promoted. Transparent continuity does no harm on
+   average in the covered tasks, but the measured benefit is inconclusive at
+   this sample size because agents under-use `query`. A larger frozen run
+   (control/C/K on the 120 generated eval tasks) is the right next test;
+   per-stratum reporting will show whether continuity concentrates its wins
+   on re-visit-heavy strata (api propagation, schema change) as hypothesized.
+
+Default remains **C**.
