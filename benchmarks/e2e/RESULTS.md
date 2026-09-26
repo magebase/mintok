@@ -316,3 +316,99 @@ trajectories stay visible instead of hiding inside averages.
 Next: frozen out-of-sample run — control (primary baseline) vs C (primary
 experiment) vs K (secondary, exploratory) on the 120 generated eval tasks,
 reported per stratum.
+
+## Frozen out-of-sample evaluation (120 generated tasks, control vs C)
+
+The frozen eval ran the 120 stratified generated tasks (`tasks_generated.json`,
+never used for development decisions) against the shell-only `control` arm and
+frozen **C**. Every task ran once per arm; scores were recorded immediately
+after each run (`runs/control-eval.jsonl`, `runs/C-eval.jsonl`). Three
+checker defects were found and fixed mid-run (each validated against pristine
+fixtures before attributing anything to agents; commits `7cdf902`, `091cf09`,
+`e3fcbc2`, `ea53ab5`, `bfbc4b0`, `c43acf4`).
+
+### Aggregate (n=120 per arm)
+
+| arm | solved | tok/attempt | tok/solved | median | p90 | p95 | max |
+|---|---|---|---|---|---|---|---|
+| control-eval | 114 (95%) | 1,876 | 1,974 | 1,087 | 2,882 | 4,080 | 26,842 |
+| C-eval | 114 (95%) | **1,607** | **1,691** | 1,161 | **2,946** | **3,138** | **8,482** |
+
+- **Solve rate: identical** (114/120 both; fails below).
+- **Average tool-context tokens: C 14.3% cheaper** per attempt and per solve.
+- **Paired geomean on the 111 jointly solved tasks: 0.93x** (C 7% cheaper;
+  median 0.95x; C wins 51/111). The dev-set 1.30x did **not** survive at full
+  strength — but the aggregate hides where C wins and loses.
+- **Tail: C's real advantage.** p95 3,138 vs 4,080 (−23%); max 8,482 vs
+  26,842 (−68%). C's semantic reads bound worst-case wandering; control's
+  single worst trajectory cost 3.2x C's worst. Under real billing the max,
+  not the mean, is what hurts.
+
+### Per stratum (tokens per solved task, C vs control)
+
+| stratum | C solve | ctrl solve | C tok/solv | ctrl tok/solv | C vs ctrl |
+|---|---|---|---|---|---|
+| api_signature_propagation | 19/20 | 19/20 | 1,618 | 4,008 | **2.48x cheaper** |
+| simple_lookup | 15/15 | 14/15 | 943 | 1,341 | 1.42x cheaper |
+| feature_addition | 20/20 | 19/20 | 1,166 | 1,544 | 1.32x cheaper |
+| schema_or_framework_change | 15/15 | 15/15 | 2,170 | 2,633 | 1.21x cheaper |
+| cross_file_bug | 17/20 | 18/20 | 1,793 | 1,594 | 0.89x (costlier) |
+| refactor | 15/15 | 14/15 | 1,627 | 1,158 | 0.71x (costlier) |
+| large_file_navigation | 13/15 | 15/15 | 2,861 | 1,093 | **0.38x (2.6x costlier, −2 solves)** |
+
+**C's efficiency is concentrated, not uniform.** It wins big exactly where
+designed — revisit-heavy api-signature propagation (2.48x), lookups,
+features, schema changes — and *loses* on `large_file_navigation`, where
+semantic reads over a huge module cost 2.6x the control's targeted grep with
+2 fewer solves. Cross-file bugs and refactors are ~costlier but safer on
+solve rate.
+
+### Failure accounting (kept, per policy)
+
+- Both arms: `pipeline-cross-04` (checker requires the parameter named
+  exactly `policy`; genuine spec-reading trap), `biglib-api-02` (both arms
+  broke wrap_text's byte-identical default), `biglib-cross-02` (both arms
+  failed the word-boundary truncation edge).
+- control only: `shopcart-lookup-03` (genuine miss), `shopcart-refactor-03`
+  (flaky), `notesrv-feature-02` (made `excerpt(length)` required despite the
+  instruction's `excerpt(length=40)` signature; C read it correctly).
+- C only: `biglib-large-03` (inverted emptiness logic its suite didn't catch),
+  `biglib-large-14`, `pipeline-cross-03`.
+
+### Verdict
+
+**C holds as the default.** Equal solve at −14% tokens with a −68% worst
+case is a real but modest out-of-sample win: 1.17x aggregate, 1.08x paired —
+not the dev set's 1.30x. The loss profile (large files) is the clearest
+input to the next lever: large-module navigation needs deterministic
+symbol/slice tooling under the interface, not more semantic reads.
+
+**K was not run on the 120.** K is a rejected arm (29/30, 0.70x paired on
+the dev set); under the funnel policy a full frozen exam is reserved for
+shippable candidates, so the 120 K runs are dropped.
+
+### Experiment funnel (infrastructure)
+
+To stop paying frontier compute for bad ideas, the harness now ships a
+funnel (`mintok.funnel`, wired into `run_bench.py`):
+
+1. **Static integrity first.** `fingerprint`/`verify` hash prompt, checker,
+   and fixture tree; a drifted task refuses to run (exit 2) instead of
+   invalidating a wave.
+2. **FAST-8 smoke suite** — 8 tasks covering lookup, cross-file, api
+   propagation, schema, large-file, ordinary-edit, feature, and the known
+   trap (`fast8` subcommand). Ideas die here first.
+3. **Sequential stopping.** `sequential_verdict` kills an arm at 5 paired
+   tasks if it is ≥25% costlier, at 10 if ≥15% costlier, at 15 without a
+   ≥5% improvement, and any time solve rate drops >5 points.
+4. **Control cache.** `control_key` hashes task + repo snapshot + harness +
+   model + effort + toolset; identical configurations reuse the stored
+   control trajectory instead of rerunning it per arm.
+5. **Adaptive concurrency.** `AdaptivePool` starts at 8 workers, grows +2
+   per clean wave to 12, and drops 3 on provider throttling — replacing the
+   fixed 20+-worker waves that triggered rate-limit storms.
+6. **Copy-on-write prepare.** Fixture copies try `cp --reflink=auto` before
+   falling back to a deep copy (never hardlinks: agents edit in place).
+7. **Offline replay.** `replay` recomputes turns/tokens/latency for every
+   trajectory from raw shim logs with zero agent runs — metric changes
+   never require rerunning arms.

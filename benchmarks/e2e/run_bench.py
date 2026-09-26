@@ -8,10 +8,15 @@ context exposure is measured exactly from the trajectory logs.
 Subcommands:
   prepare --dest DIR [--task ID]     export the task's repo into DIR (clean tree;
                                      mintok tasks use the git archive, fixture
-                                     tasks copy benchmarks/e2e/fixtures/<repo>)
+                                     tasks CoW/copy benchmarks/e2e/fixtures/<repo>)
   check --root COPY --task ID        run suite + task checker; write score JSON next to log
   record --arm ARM --task ID         fold one trajectory log + score into runs/<arm>.jsonl
   report                             aggregate runs/ into the proxy efficiency report
+  fingerprint --task ID              emit the immutable task fingerprint (prompt/checker/fixtures)
+  verify --task ID --fingerprint F   refuse to run a drifted task (non-zero exit on mismatch)
+  fast8                              print the FAST-8 smoke suite (id and behavior class)
+  replay --logs DIR [--out FILE]     recompute per-task metrics from raw trajectory logs
+                                     with zero agent runs
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ HARNESS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HARNESS_ROOT / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from mintok.funnel import FAST8, task_fingerprint, verify_fingerprint, TaskIntegrityError  # noqa: E402
 from mintok.metrics import RunRecord  # noqa: E402
 from mintok.tokens import estimate_tokens  # noqa: E402
 from tasks import TASKS  # noqa: E402
@@ -65,7 +71,16 @@ def prepare(dest: Path, task_id: str | None = None) -> None:
         archive = subprocess.run(["git", "archive", "HEAD"], cwd=HARNESS_ROOT, capture_output=True, check=True)
         subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
     else:
-        shutil.copytree(FIXTURES_DIR / repo, dest, dirs_exist_ok=True)
+        source = FIXTURES_DIR / repo
+        # Copy-on-write first (reflink on btrfs/XFS/NFS 4.2, near-instant);
+        # plain deep copy where the filesystem cannot CoW. Never hardlink:
+        # agents edit files in place and would mutate the pristine fixture.
+        reflink = subprocess.run(
+            ["cp", "-a", "--reflink=auto", str(source) + "/.", str(dest)],
+            capture_output=True,
+        )
+        if reflink.returncode != 0:
+            shutil.copytree(source, dest, dirs_exist_ok=True)
     print(dest)
 
 
@@ -266,6 +281,57 @@ def report() -> None:
         print(f"{task_id:<32}" + "  ".join(cells))
 
 
+def fixture_root_for(task_id: str) -> Path | None:
+    repo = task_by_id(task_id).get("repo", "mintok")
+    return FIXTURES_DIR / repo if repo != "mintok" else None
+
+
+def fingerprint(task_id: str) -> None:
+    print(json.dumps(task_fingerprint(task_by_id(task_id), fixture_root_for(task_id)), indent=2))
+
+
+def verify(task_id: str, fingerprint_file: Path) -> None:
+    stored = json.loads(fingerprint_file.read_text())
+    try:
+        verify_fingerprint(task_by_id(task_id), stored, fixture_root_for(task_id))
+    except TaskIntegrityError as exc:
+        print(f"REFUSED: {exc}")
+        raise SystemExit(2)
+    print(f"ok: {task_id} matches its fingerprint")
+
+
+def fast8() -> None:
+    for task_id, klass in FAST8:
+        print(f"{task_id:<32}{klass}")
+
+
+def replay(logs_dir: Path, out: Path | None) -> None:
+    """Recompute per-task trajectory metrics from raw shim logs. Zero runs."""
+    rows = []
+    for log in sorted(Path(logs_dir).glob("*.jsonl")):
+        entries = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+        if not entries:
+            continue
+        score_path = log.parent / f"{log.stem}.score.json"
+        solved = json.loads(score_path.read_text())["solved"] if score_path.exists() else None
+        rows.append(
+            {
+                "task": log.stem,
+                "turns": len(entries),
+                "tool_output_tokens": sum(estimate_tokens(e.get("output", "")) for e in entries),
+                "tool_input_tokens": sum(estimate_tokens(json.dumps(e.get("args", ""))) for e in entries),
+                "latency_s": round((entries[-1]["ts"] - entries[0]["ts"]) if len(entries) > 1 else 0.0, 1),
+                "solved": solved,
+            }
+        )
+    text = json.dumps(rows, indent=2) if out is None else None
+    if out is not None:
+        out.write_text(json.dumps(rows, indent=2))
+        print(f"{len(rows)} trajectories -> {out}")
+    else:
+        print(text)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="e2e")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -286,6 +352,19 @@ def main() -> None:
 
     sub.add_parser("report")
 
+    fpr = sub.add_parser("fingerprint")
+    fpr.add_argument("--task", required=True)
+
+    vfy = sub.add_parser("verify")
+    vfy.add_argument("--task", required=True)
+    vfy.add_argument("--fingerprint", type=Path, required=True)
+
+    sub.add_parser("fast8")
+
+    rpl = sub.add_parser("replay")
+    rpl.add_argument("--logs", type=Path, required=True)
+    rpl.add_argument("--out", type=Path, default=None)
+
     args = parser.parse_args()
     if args.cmd == "prepare":
         prepare(args.dest, args.task)
@@ -293,6 +372,14 @@ def main() -> None:
         check(args.root, args.task, args.log)
     elif args.cmd == "record":
         record(args.arm, args.task, args.log)
+    elif args.cmd == "fingerprint":
+        fingerprint(args.task)
+    elif args.cmd == "verify":
+        verify(args.task, args.fingerprint)
+    elif args.cmd == "fast8":
+        fast8()
+    elif args.cmd == "replay":
+        replay(args.logs, args.out)
     else:
         report()
 
