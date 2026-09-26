@@ -181,3 +181,76 @@ rename-stable-hash              OK OK      479   1386   0.3x
   is the strongest realistic baseline (grep/sed/pytest), not a straw man.
 - `new-pack-is-empty` is unsolved on both arms (its behavioral edge case
   requires reading the semantics carefully, not a tooling difference).
+
+## V3 experiments: batched reads, virtualized shell, codemods (arms H/I/J)
+
+Three levers were built on top of C (the shipped default) and measured on the
+same 30 tasks, verbatim canonical instructions, 30 fresh copies per arm:
+
+- **H = C + `query batch`** — one call may answer several read questions
+  (`query batch "symbol:mod:fn callers:mod:fn"`).
+- **I = C + virtualized shell** — shell output is stored to disk; the agent
+  sees a 40-line head plus a handle, and pages/finds via `result R1 ...`.
+- **J = C + deterministic codemods** — `codemod rename|add_parameter|add_import`
+  applies AST-verified structural transforms; the model emits only arguments.
+
+Four-metric headline (tool-context tokens; `tok/solv` is the $-per-success
+proxy until API billing telemetry lands):
+
+```
+arm    policy                    solved  solve%  turns/att  tok/att  tok/solv
+---------------------------------------------------------------------------
+C      reads + attribution         30/30   100%       7.2       1753      1753
+H      C + query batch             29/30    97%       9.9       2590      2679
+I      C + virtual shell           29/30    97%       7.8       2046      2116
+J      C + codemods                28/30    93%       7.9       2104      2254
+--- reference arms from the ablation ladder ---
+control  grep/paging               29/30    97%       5.1       2209      2285
+B        reads only                30/30   100%       6.4       1834      1834
+D        reads + freeform edits    29/30    97%       8.5       1938      2005
+E        C + task packets          29/30    97%      14.0       3393      3510
+F        C + circuit breaker       29/30    97%      14.8       6853      7089
+G        C + packet planner        29/30    97%      16.0       4906      5075
+mintok   ABI-only (v1)             26/30    87%      16.8       2570      2965
+
+paired geomean vs control (jointly solved): B 0.85x, C 0.85x, D 0.82x,
+H 0.62x, I 0.73x, J 0.69x, E 0.54x, F 0.42x, G 0.42x
+```
+
+### Findings
+
+1. **C stands.** It remains the only arm at 30/30 with the lowest tokens
+   (1753/att) and near-lowest turns (7.2). All three new levers regressed
+   tokens and none beat control's 5.1 turns/att.
+2. **Batching backfired (H).** Turns rose 7.2 -> 9.9 and tokens +48%. Batched
+   queries over-fetch (workers answer speculative questions they did not
+   need), and malformed batch specs add rejection/retry turns. Turn-count
+   reduction was NOT achieved by merging read calls.
+3. **Virtual shell is tail-risk insurance, not average savings (I).** Worst
+   per-task tool context dropped from 94,747 (uncapped breaker, F) and
+   30,272 (packets, E) to 8,947; but the head+handle boilerplate taxes every
+   shell call, costing ~+17% tokens on average because floods never occur in
+   this suite. Keep it as a safety cap, not as a token lever.
+4. **Codemods break even at this scale (J).** The shim's edit responses were
+   already compact; emitting arguments instead of edits saves model output
+   the shim never charged for. One checker-strict failure appeared (a
+   trailing-style comment next to SKIP_DIRS fails the own-line-comment
+   checker that accepts the same comment on its own lines).
+5. **`new-pack-is-empty` has now failed on control, D, E, F, G, H, I, J** —
+   a stable semantic trap (omitted_body_only accounting), independent of
+   tooling. Retained as a known-hard item.
+
+### Verdict against the V3 targets
+
+- 30/30: only B and C reach it.
+- turns <= 5.1 (control): not reached; best is C at 7.2. Batched reads
+  made turns worse, so the next turn lever must come from elsewhere
+  (candidate: interface-hash-aware "component unchanged" short-circuits,
+  i.e. the agent skips relearning files whose interface hash is known).
+- tokens < 1,500/att: not reached; best is C at 1753. With the tool surface
+  at 165 tokens charged once, and reads already paid-for, the remaining
+  mass is edit-turn context — pointing back at edit gating (ship C) and
+  larger-task validation before more surface changes.
+
+The three V3 mechanisms stay in the codebase behind policies (H/I/J) with
+scenario coverage; none is promoted to the default. Default remains **C**.
