@@ -1,0 +1,29 @@
+--- pristine/src/pipeline/runner.py
++++ solved/src/pipeline/runner.py
+@@ -42,20 +42,23 @@
+             stats.skipped = len(skipped)
+ 
+         for step in self.transforms:
+-            batch = self._apply(batch, step)
++            batch, dropped = self._apply(batch, step)
++            stats.skipped += dropped
+ 
+         self.sink.write(batch)
+         self.sink.close()
+         stats.processed = len(batch)
+         return stats
+ 
+-    def _apply(self, batch: RecordBatch, step: Transform) -> RecordBatch:
++    def _apply(self, batch: RecordBatch, step: Transform) -> tuple[RecordBatch, int]:
+         from pipeline.errors import SkipRecord
+ 
+         out = RecordBatch(name=batch.name)
++        dropped = 0
+         for record in batch.records:
+             try:
+                 out.add(step(record))
+             except SkipRecord:
++                dropped += 1
+                 continue
+-        return out
++        return out, dropped

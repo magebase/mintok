@@ -1,0 +1,10 @@
+--- pristine/src/notesrv/models.py
++++ solved/src/notesrv/models.py
+@@ -46,4 +46,6 @@
+     def matches(self, query: str) -> bool:
+         """Case-insensitive substring match over title and body."""
+         needle = query.lower()
+-        return needle in self.title.lower() or needle in self.body.lower()
++        if needle in self.title.lower() or needle in self.body.lower():
++            return True
++        return any(needle in tag for tag in self.tags)

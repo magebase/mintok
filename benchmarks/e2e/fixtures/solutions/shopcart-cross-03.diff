@@ -1,0 +1,16 @@
+--- pristine/src/shopcart/orders.py
++++ solved/src/shopcart/orders.py
+@@ -27,9 +27,13 @@
+ 
+     def place_order(self, cart: Cart, region: str, code: str | None = None) -> Order:
+         """Reserve stock and price the cart; raises OutOfStockError on shortage."""
++        reserved: list[tuple[str, int]] = []
+         for item in cart.items:
+             if not self.inventory.reserve(item.product.sku, item.quantity):
++                for sku, units in reserved:
++                    self.inventory.release(sku, units)
+                 raise OutOfStockError(f"insufficient stock for {item.product.sku}")
++            reserved.append((item.product.sku, item.quantity))
+ 
+         subtotal = sum(item.line_total_cents for item in cart.items)
+         discount = 0

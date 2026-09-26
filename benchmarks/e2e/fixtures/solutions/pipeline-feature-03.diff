@@ -1,0 +1,20 @@
+--- pristine/src/pipeline/transforms.py
++++ solved/src/pipeline/transforms.py
+@@ -46,6 +46,17 @@
+     return transform
+ 
+ 
++def map_value(fn) -> Transform:
++    """Return a transform applying fn to the record value."""
++
++    def transform(record: Record) -> Record:
++        out = record.copy()
++        out.value = fn(out.value)
++        return out
++
++    return transform
++
++
+ def annotate_meta(**fields) -> Transform:
+     """Attach constant metadata to every record."""
+ 

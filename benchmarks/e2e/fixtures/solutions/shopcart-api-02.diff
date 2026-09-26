@@ -1,0 +1,19 @@
+--- pristine/src/shopcart/receipts.py
++++ solved/src/shopcart/receipts.py
+@@ -6,12 +6,13 @@
+ from shopcart.models import Order
+ 
+ 
+-def render_receipt(order: Order) -> str:
++def render_receipt(order: Order, width: int = 32) -> str:
+     """Render an order as a fixed-width text receipt."""
+-    lines = [f"Receipt {order.order_id}", "-" * 32]
++    rule = "-" * width
++    lines = [f"Receipt {order.order_id}", rule]
+     for sku, name, qty, unit_price in order.lines:
+         line_total = qty * unit_price
+         lines.append(f"{name:<18} x{qty:<3} {format_money(line_total):>10}  ({sku})")
+-    lines.append("-" * 32)
++    lines.append(rule)
+     lines.append(f"{'TOTAL':<18}      {format_money(order.total_cents):>10}")
+     return "\n".join(lines)

@@ -1,0 +1,842 @@
+[
+  {
+    "id": "shopcart-lookup-01",
+    "klass": "simple_lookup",
+    "repo": "shopcart",
+    "instruction": "Make parse_money in src/shopcart/currency.py accept negative amounts: \"-$2.50\" and \"-2.50\" must parse to -250. Positive parsing and error cases are unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.currency import parse_money\nassert parse_money(\"-$2.50\") == -250\nassert parse_money(\"-2.50\") == -250\nassert parse_money(\"$12.34\") == 1234\ntry:\n    parse_money(\"abc\")\n    raise AssertionError(\"expected ValueError\")\nexcept ValueError:\n    pass\nok = True\n"
+  },
+  {
+    "id": "shopcart-lookup-02",
+    "klass": "simple_lookup",
+    "repo": "shopcart",
+    "instruction": "Fix round_half_up in src/shopcart/currency.py so negative halves round away from zero: round_half_up(-2.5) == -3 and round_half_up(-2.4) == -2. Positive behavior must stay identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.currency import round_half_up\nassert round_half_up(-2.5) == -3\nassert round_half_up(-2.4) == -2\nassert round_half_up(2.5) == 3\nassert round_half_up(2.4) == 2\nok = True\n"
+  },
+  {
+    "id": "shopcart-lookup-03",
+    "klass": "simple_lookup",
+    "repo": "shopcart",
+    "instruction": "Strengthen Product.__post_init__ in src/shopcart/models.py: raise ValueError when sku or name is blank. Existing valid products are unaffected.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Product\nfor bad in ((\"\", \"Name\", 100), (\"SKU-1\", \"   \", 100)):\n    try:\n        Product(bad[0], bad[1], bad[2])\n        raise AssertionError(f\"expected ValueError for {bad}\")\n    except ValueError:\n        pass\np = Product(\"SKU-1\", \"Name\", 100)\nassert p.unit_price_cents == 100\nok = True\n"
+  },
+  {
+    "id": "shopcart-cross-01",
+    "klass": "cross_file_bug",
+    "repo": "shopcart",
+    "instruction": "OrderService.order_summary in src/shopcart/orders.py misuses pricing.compute_total by passing order.total_cents as the subtotal. Fix it so 'subtotal' is the sum of the order line totals, 'discount' is the code discount that was applied, and 'total' equals order.total_cents.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"B1\", \"Book\", 1995), 2)\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\nsummary = service.order_summary(order)\nassert summary[\"subtotal\"] == 3591, summary\nassert summary[\"discount\"] == 399, summary\nassert summary[\"total\"] == order.total_cents, summary\nassert summary[\"lines\"] == 2, summary\nok = True\n"
+  },
+  {
+    "id": "shopcart-cross-02",
+    "klass": "cross_file_bug",
+    "repo": "shopcart",
+    "instruction": "Free shipping must be decided on the discounted subtotal, not the raw cart subtotal. Add an optional discount_cents parameter (default 0) to shipping_for_cart in src/shopcart/shipping.py, and update OrderService.place_order in src/shopcart/orders.py to pass the applied discount when it calls shipping_for_cart.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nfrom shopcart.shipping import shipping_for_cart\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"X1\", \"Thing\", 4000), 2)  # subtotal 8000\nassert shipping_for_cart(cart, \"US\", discount_cents=800) == 500\nservice = OrderService(Inventory())\norder = service.place_order(cart, \"US\", code=\"SAVE10\")\n# discounted 7200 < threshold, so shipping 500 applies\nassert order.total_cents == 7200 + 594 + 500, order.total_cents\nok = True\n"
+  },
+  {
+    "id": "shopcart-cross-03",
+    "klass": "cross_file_bug",
+    "repo": "shopcart",
+    "instruction": "OrderService.place_order in src/shopcart/orders.py reserves inventory item by item, so a shortage on a later item leaks the earlier reservations. Roll back every reservation made before raising OutOfStockError.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory, OutOfStockError\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\ninventory = Inventory({\"A1\": 5, \"B2\": 1})\nservice = OrderService(inventory)\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"A1\", \"Alpha\", 100), 5)\ncart.add(Product(\"B2\", \"Beta\", 200), 2)\ntry:\n    service.place_order(cart, \"US\")\n    raise AssertionError(\"expected OutOfStockError\")\nexcept OutOfStockError:\n    pass\nassert inventory.available(\"A1\") == 5, inventory.available(\"A1\")\nassert inventory.available(\"B2\") == 1\nok = True\n"
+  },
+  {
+    "id": "shopcart-cross-04",
+    "klass": "cross_file_bug",
+    "repo": "shopcart",
+    "instruction": "Placing an order to an unknown region currently raises ValueError from the shipping module. Make OrderService.place_order in src/shopcart/orders.py fall back to the 'ROW' regional rate for unrecognized regions so placement succeeds.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"M1\", \"Mug\", 825), 1)\ntry:\n    order = service.place_order(cart, \"MARS\")\nexcept ValueError as exc:\n    raise AssertionError(f\"place_order raised: {exc}\")\nassert order.total_cents == 825 + 68 + 2000, order.total_cents\nok = True\n"
+  },
+  {
+    "id": "shopcart-cross-05",
+    "klass": "cross_file_bug",
+    "repo": "shopcart",
+    "instruction": "legacy_percent_off in src/shopcart/discounts.py duplicates pricing rounding with truncating int() math, so it disagrees with pricing.apply_percentage_discount on odd cents. Reimplement it as a delegation to apply_percentage_discount (still clamping percent at 100) so both paths round identically.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.discounts import legacy_percent_off\nfrom shopcart.pricing import apply_percentage_discount\nassert legacy_percent_off(1001, 10) == 901\nassert legacy_percent_off(1000, 150) == 0\nassert legacy_percent_off(1000, 10) == apply_percentage_discount(1000, 10)\nok = True\n"
+  },
+  {
+    "id": "shopcart-feature-01",
+    "klass": "feature_addition",
+    "repo": "shopcart",
+    "instruction": "Add an average_order_cents property to PurchaseHistory in src/shopcart/history.py: integer cents spent per recorded order, rounded down, and 0 when the history is empty.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.history import PurchaseHistory\nfrom shopcart.models import Order\nhistory = PurchaseHistory()\nassert history.average_order_cents == 0\nhistory.record(Order(\"ORD-1\", [(\"S\", \"N\", 1, 1000)], 2500))\nhistory.record(Order(\"ORD-2\", [(\"S\", \"N\", 1, 1000)], 2501))\nassert history.average_order_cents == 2500\nok = True\n"
+  },
+  {
+    "id": "shopcart-feature-02",
+    "klass": "feature_addition",
+    "repo": "shopcart",
+    "instruction": "Add reserve_many(pairs) to Inventory in src/shopcart/inventory.py: it takes a dict of sku -> units and reserves atomically, returning True and deducting all stock only when every sku has enough, otherwise returning False and changing nothing.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\ninventory = Inventory()\nassert inventory.reserve_many({\"BOOK-001\": 30}) is False\nassert inventory.available(\"BOOK-001\") == 25\nassert inventory.reserve_many({\"BOOK-001\": 2, \"MUG-100\": 1}) is True\nassert inventory.available(\"BOOK-001\") == 23\nassert inventory.available(\"MUG-100\") == 59\nok = True\n"
+  },
+  {
+    "id": "shopcart-feature-03",
+    "klass": "feature_addition",
+    "repo": "shopcart",
+    "instruction": "Add orders_with_sku(sku) to OrderService in src/shopcart/orders.py: it returns the placed orders that contain at least one line with that SKU, in placement order.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart_a = Cart(cart_id=\"a\")\ncart_a.add(Product(\"BOOK-001\", \"Book\", 1995), 1)\ncart_b = Cart(cart_id=\"b\")\ncart_b.add(Product(\"MUG-100\", \"Mug\", 825), 1)\nservice.place_order(cart_a, \"US\")\nservice.place_order(cart_b, \"US\")\nassert [o.order_id for o in service.orders_with_sku(\"BOOK-001\")] == [\"ORD-0001\"]\nassert service.orders_with_sku(\"TEE-L\") == []\nok = True\n"
+  },
+  {
+    "id": "shopcart-feature-04",
+    "klass": "feature_addition",
+    "repo": "shopcart",
+    "instruction": "Add a function total_with_tax(amount_cents) to src/shopcart/pricing.py that returns amount_cents plus its computed tax (the same half-up tax rule compute_tax uses).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.pricing import compute_tax, total_with_tax\nassert total_with_tax(1000) == 1083\nassert total_with_tax(0) == 0\nassert total_with_tax(500) == 500 + compute_tax(500)\nok = True\n"
+  },
+  {
+    "id": "shopcart-feature-05",
+    "klass": "feature_addition",
+    "repo": "shopcart",
+    "instruction": "Give render_receipt in src/shopcart/receipts.py an optional breakdown parameter (a pricing dict from compute_total, default None). When provided, append 'Subtotal', 'Discount', 'Shipping' and 'Tax' lines with formatted money before the TOTAL line; without it the receipt is unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(\n    order_id=\"ORD-1\",\n    lines=[(\"B1\", \"Book\", 1, 1995), (\"M1\", \"Mug\", 1, 825)],\n    total_cents=3247,\n)\nbreakdown = {\"subtotal\": 2820, \"discount\": 282, \"shipping\": 500, \"tax\": 209, \"total\": 3247}\ntext = render_receipt(order, breakdown=breakdown)\nassert \"Subtotal $28.20\" in text, text\nassert \"Discount $2.82\" in text, text\nassert \"Shipping $5.00\" in text, text\nassert \"Tax $2.09\" in text, text\nassert \"TOTAL\" in text and \"$32.47\" in text, text\nassert \"Subtotal\" not in render_receipt(order)\nok = True\n"
+  },
+  {
+    "id": "shopcart-refactor-01",
+    "klass": "refactor",
+    "repo": "shopcart",
+    "instruction": "compute_tax in src/shopcart/pricing.py re-implements half-up rounding inline with math.floor. Remove the duplicated rounding: have compute_tax use shopcart.currency.round_half_up instead, with identical results.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom shopcart.pricing import compute_tax\nassert \"math.floor\" not in inspect.getsource(compute_tax)\nassert compute_tax(1000) == 83\nassert compute_tax(0) == 0\nok = True\n"
+  },
+  {
+    "id": "shopcart-refactor-02",
+    "klass": "refactor",
+    "repo": "shopcart",
+    "instruction": "Delete the superseded legacy_percent_off helper from src/shopcart/discounts.py (verify nothing under src/ uses it) and remove the test that pins its behavior from tests/test_discounts.py so the fixture suite still passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport shopcart.discounts as discounts\nassert not hasattr(discounts, \"legacy_percent_off\")\nassert hasattr(discounts, \"apply_code\")\ntests_text = open(os.path.join(root, \"tests\", \"test_discounts.py\")).read()\nassert \"legacy_percent_off\" not in tests_text\nok = True\n"
+  },
+  {
+    "id": "shopcart-refactor-03",
+    "klass": "refactor",
+    "repo": "shopcart",
+    "instruction": "Rename OrderService.place_order to checkout in src/shopcart/orders.py and update every caller (including tests) so the fixture suite passes. Behavior must be identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nassert \"place_order\" not in OrderService.__dict__\nassert \"checkout\" in OrderService.__dict__\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"M1\", \"Mug\", 825), 1)\nassert service.checkout(cart, \"US\").order_id.startswith(\"ORD-\")\ntests_text = open(os.path.join(root, \"tests\", \"test_orders.py\")).read()\nassert \"place_order\" not in tests_text\nok = True\n"
+  },
+  {
+    "id": "shopcart-api-01",
+    "klass": "api_signature_propagation",
+    "repo": "shopcart",
+    "instruction": "Add a tip_cents keyword parameter (default 0) to compute_total in src/shopcart/pricing.py; the tip is added to the returned 'total' after tax and shipping. Existing callers are unaffected.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.pricing import compute_total\nassert compute_total(1000, 0, 500, tip_cents=100)[\"total\"] == 1683\nassert compute_total(1000)[\"total\"] == 1083\nassert compute_total(1000, 0, 500, tip_cents=0)[\"total\"] == 1583\nok = True\n"
+  },
+  {
+    "id": "shopcart-api-02",
+    "klass": "api_signature_propagation",
+    "repo": "shopcart",
+    "instruction": "Add a width keyword parameter (default 32) to render_receipt in src/shopcart/receipts.py controlling the length of the dashed rule lines. Callers without the argument must see byte-identical output.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(order_id=\"ORD-1\", lines=[(\"B1\", \"Book\", 1, 1995)], total_cents=1995)\nwide = render_receipt(order, width=40).splitlines()\nassert wide[1] == \"-\" * 40 and wide[-2] == \"-\" * 40\nnormal = render_receipt(order).splitlines()\nassert normal[1] == \"-\" * 32 and normal[-2] == \"-\" * 32\nok = True\n"
+  },
+  {
+    "id": "shopcart-api-03",
+    "klass": "api_signature_propagation",
+    "repo": "shopcart",
+    "instruction": "Add a surcharge_per_kg keyword parameter (default None, meaning the module's SURCHARGE_PER_KG_CENTS) to estimate_shipping in src/shopcart/shipping.py; callers across src/ and tests/ keep working unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.shipping import REGION_RATES, estimate_shipping\nassert estimate_shipping(2500, \"US\", surcharge_per_kg=200) == REGION_RATES[\"US\"] + 400\nassert estimate_shipping(2500, \"US\") == REGION_RATES[\"US\"] + 200\nassert estimate_shipping(500, \"US\", surcharge_per_kg=200) == REGION_RATES[\"US\"]\nok = True\n"
+  },
+  {
+    "id": "shopcart-api-04",
+    "klass": "api_signature_propagation",
+    "repo": "shopcart",
+    "instruction": "Add an order_id keyword parameter (default None) to OrderService.place_order in src/shopcart/orders.py: when supplied, the placed order uses that id instead of the generated one; otherwise generation is unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, Product\nfrom shopcart.orders import OrderService\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"M1\", \"Mug\", 825), 1)\ncustom = service.place_order(cart, \"US\", order_id=\"CUSTOM-9\")\nassert custom.order_id == \"CUSTOM-9\"\nagain = service.place_order(cart, \"US\")\nassert again.order_id.startswith(\"ORD-\")\nok = True\n"
+  },
+  {
+    "id": "shopcart-schema-01",
+    "klass": "schema_or_framework_change",
+    "repo": "shopcart",
+    "instruction": "Add a currency field (default \"USD\") to the Order dataclass in src/shopcart/models.py, and make render_receipt in src/shopcart/receipts.py append a 'Currency: X' line whenever the order's currency is not USD. Update any consumers as needed so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.models import Order\nfrom shopcart.receipts import render_receipt\norder = Order(order_id=\"O1\", lines=[(\"S\", \"N\", 1, 100)], total_cents=100)\nassert order.currency == \"USD\"\neur = Order(order_id=\"O2\", lines=[], total_cents=0, currency=\"EUR\")\nassert \"Currency: EUR\" in render_receipt(eur)\nassert \"Currency\" not in render_receipt(Order(order_id=\"O3\", lines=[], total_cents=0))\nok = True\n"
+  },
+  {
+    "id": "shopcart-schema-02",
+    "klass": "schema_or_framework_change",
+    "repo": "shopcart",
+    "instruction": "Change DiscountCode percent values in src/shopcart/discounts.py to be stored as fractions (SAVE10 becomes 0.10, BIGDEAL 0.25, VIPHALF 0.5) and update apply_code so percent codes produce the same discounted subtotals as before. Flat codes keep integer cents.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.discounts import DISCOUNT_CODES, apply_code\nassert DISCOUNT_CODES[\"SAVE10\"].value == 0.10\nassert DISCOUNT_CODES[\"BIGDEAL\"].value == 0.25\nnew_subtotal, message = apply_code(10000, \"SAVE10\")\nassert new_subtotal == 9000 and message == \"applied SAVE10\"\nnew_subtotal, _ = apply_code(2000, \"FIVEOFF\")\nassert new_subtotal == 1500\nok = True\n"
+  },
+  {
+    "id": "shopcart-schema-03",
+    "klass": "schema_or_framework_change",
+    "repo": "shopcart",
+    "instruction": "Replace the raw tuples in Order.lines with a new OrderLine dataclass (sku, name, quantity, unit_price_cents) defined in src/shopcart/models.py, update OrderService to build them, and update every consumer (receipts, history) plus tests so behavior is unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom shopcart.history import PurchaseHistory\nfrom shopcart.inventory import Inventory\nfrom shopcart.models import Cart, OrderLine, Product\nfrom shopcart.orders import OrderService\nfrom shopcart.receipts import render_receipt\nservice = OrderService(Inventory())\ncart = Cart(cart_id=\"c\")\ncart.add(Product(\"BOOK-001\", \"Intro to Testing\", 1995), 2)\norder = service.place_order(cart, \"US\")\nline = order.lines[0]\nassert isinstance(line, OrderLine)\nassert line.sku == \"BOOK-001\" and line.quantity == 2 and line.unit_price_cents == 1995\nhistory = PurchaseHistory()\nhistory.record(order)\nassert history.units_sold(\"BOOK-001\") == 2\nassert \"Intro to Testing\" in render_receipt(order)\nok = True\n"
+  },
+  {
+    "id": "pipeline-lookup-01",
+    "klass": "simple_lookup",
+    "repo": "pipeline",
+    "instruction": "Make uppercase_value in src/pipeline/transforms.py uppercase the record key as well as the value. It must stay pure (no mutation of the input).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.records import Record\nfrom pipeline.transforms import uppercase_value\nout = uppercase_value(Record(\"a\", \"x\"))\nassert (out.key, out.value) == (\"A\", \"X\")\nok = True\n"
+  },
+  {
+    "id": "pipeline-lookup-02",
+    "klass": "simple_lookup",
+    "repo": "pipeline",
+    "instruction": "Let MemoryReader in src/pipeline/readers.py accept optional third elements in its pairs: a 2-tuple means no metadata, a 3-tuple (key, value, meta) populates the record's meta dict.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nbatch = MemoryReader([(\"a\", \"1\", {\"n\": 1}), (\"b\", \"2\")]).read()\nassert batch.records[0].meta == {\"n\": 1}\nassert batch.records[1].meta == {}\nassert batch.keys() == [\"a\", \"b\"]\nok = True\n"
+  },
+  {
+    "id": "pipeline-lookup-03",
+    "klass": "simple_lookup",
+    "repo": "pipeline",
+    "instruction": "Make prefix_key in src/pipeline/transforms.py idempotent: applying a prefix to a key that already starts with it must not duplicate the prefix.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.records import Record\nfrom pipeline.transforms import prefix_key\nassert prefix_key(\"v2:\")(Record(\"v2:a\", \"x\")).key == \"v2:a\"\nassert prefix_key(\"v2:\")(Record(\"a\", \"x\")).key == \"v2:a\"\nok = True\n"
+  },
+  {
+    "id": "pipeline-cross-01",
+    "klass": "cross_file_bug",
+    "repo": "pipeline",
+    "instruction": "JsonlReader in src/pipeline/readers.py leaks a raw KeyError when a JSON line is missing 'key' or 'value'. Raise the pipeline hierarchy's ConfigurationError (from src/pipeline/errors.py) with a message naming the missing field instead.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.errors import ConfigurationError\nfrom pipeline.readers import JsonlReader\ntry:\n    JsonlReader('{\"foo\": 1}').read()\n    raise AssertionError(\"expected ConfigurationError\")\nexcept ConfigurationError as exc:\n    assert \"key\" in str(exc) or \"value\" in str(exc)\nassert len(JsonlReader('{\"key\": \"a\", \"value\": \"1\"}').read()) == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-cross-02",
+    "klass": "cross_file_bug",
+    "repo": "pipeline",
+    "instruction": "Pipeline.run in src/pipeline/runner.py counts records dropped by validation rules in RunStats.skipped, but silently loses the records dropped by transforms raising SkipRecord in _apply. Make the transform-phase drops counted in stats.skipped too.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import ListSink\nfrom pipeline.transforms import drop_empty\npipe = Pipeline(\n    MemoryReader([(\"a\", \"1\"), (\"b\", \"  \"), (\"c\", \"3\")]),\n    ListSink(),\n    transforms=[drop_empty()],\n)\nstats = pipe.run()\nassert stats.processed == 2, stats\nassert stats.skipped == 1, stats\nok = True\n"
+  },
+  {
+    "id": "pipeline-cross-03",
+    "klass": "cross_file_bug",
+    "repo": "pipeline",
+    "instruction": "If sink.write raises, Pipeline.run in src/pipeline/runner.py never closes the sink. Restructure run() so sink.close() is always called, even when a transform or the sink itself raises.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import Sink\n\nclass ExplodingSink(Sink):\n    name = \"exploding\"\n    def __init__(self):\n        self.closed = False\n    def write(self, item):\n        raise RuntimeError(\"sink exploded\")\n    def close(self):\n        self.closed = True\n\ndef boom(record):\n    raise RuntimeError(\"boom\")\n\nsink = ExplodingSink()\npipe = Pipeline(MemoryReader([(\"a\", \"1\")]), sink, transforms=[boom])\ntry:\n    pipe.run()\n    raise AssertionError(\"expected RuntimeError\")\nexcept RuntimeError:\n    pass\nassert sink.closed is True, sink.closed\nok = True\n"
+  },
+  {
+    "id": "pipeline-cross-04",
+    "klass": "cross_file_bug",
+    "repo": "pipeline",
+    "instruction": "Wire the retry module into the runner: Pipeline in src/pipeline/runner.py gains an optional policy parameter (a pipeline.retry.RetryPolicy, default None). When set, a PipelineError from reader.read() is retried per the policy before the run fails.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.errors import PipelineError\nfrom pipeline.readers import Reader\nfrom pipeline.records import Record, RecordBatch\nfrom pipeline.retry import RetryPolicy\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import ListSink\n\nclass FlakyReader(Reader):\n    name = \"flaky\"\n    def __init__(self):\n        self.calls = 0\n    def read(self):\n        self.calls += 1\n        if self.calls < 3:\n            raise PipelineError(\"flaky\")\n        batch = RecordBatch(name=\"f\")\n        batch.add(Record(\"a\", \"1\"))\n        return batch\n\nreader = FlakyReader()\nsink = ListSink()\nstats = Pipeline(reader, sink, policy=RetryPolicy(max_attempts=3)).run()\nassert stats.processed == 1 and reader.calls == 3\nok = True\n"
+  },
+  {
+    "id": "pipeline-cross-05",
+    "klass": "cross_file_bug",
+    "repo": "pipeline",
+    "instruction": "FileSink in src/pipeline/sinks.py loses the batch name. Make it write a first line '# batch: <name>' (from the RecordBatch it receives) before the record lines, so pipeline output identifies its source batch.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport tempfile\nfrom pipeline.readers import CsvReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import FileSink\nwith tempfile.TemporaryDirectory() as td:\n    path = os.path.join(td, \"out.txt\")\n    Pipeline(CsvReader(\"key,value\\na,1\\n\"), FileSink(path)).run()\n    lines = open(path).read().splitlines()\nassert lines[0] == \"# batch: csv\", lines\nassert lines[1] == \"a=1\", lines\nok = True\n"
+  },
+  {
+    "id": "pipeline-feature-01",
+    "klass": "feature_addition",
+    "repo": "pipeline",
+    "instruction": "Add a filter_by_prefix(prefix) transform factory to src/pipeline/transforms.py: records whose key starts with the prefix pass through unchanged; others raise SkipRecord so the runner drops them.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import ListSink\nfrom pipeline.transforms import filter_by_prefix\nfrom pipeline.records import Record\nkept = filter_by_prefix(\"a-\")(Record(\"a-1\", \"x\"))\nassert kept.key == \"a-1\"\npipe = Pipeline(\n    MemoryReader([(\"a-1\", \"1\"), (\"b-2\", \"2\")]),\n    ListSink(),\n    transforms=[filter_by_prefix(\"a-\")],\n)\nstats = pipe.run()\nassert stats.processed == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-feature-02",
+    "klass": "feature_addition",
+    "repo": "pipeline",
+    "instruction": "Add merge_batches(a, b) to src/pipeline/records.py: it returns a new RecordBatch named after a containing a's records followed by b's, leaving both inputs untouched.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.records import Record, RecordBatch, merge_batches\na = RecordBatch(\"x\", [Record(\"a\", \"1\")])\nb = RecordBatch(\"y\", [Record(\"b\", \"2\")])\nmerged = merge_batches(a, b)\nassert merged.name == \"x\" and len(merged) == 2 and merged.keys() == [\"a\", \"b\"]\nassert len(a) == 1 and len(b) == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-feature-03",
+    "klass": "feature_addition",
+    "repo": "pipeline",
+    "instruction": "Add a map_value(fn) transform factory to src/pipeline/transforms.py: it returns a transform applying fn to the record value and returning the new record.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.records import Record\nfrom pipeline.transforms import map_value\nassert map_value(str.title)(Record(\"a\", \"hello world\")).value == \"Hello World\"\nassert map_value(lambda v: v + \"!\")(Record(\"a\", \"x\")).value == \"x!\"\nok = True\n"
+  },
+  {
+    "id": "pipeline-feature-04",
+    "klass": "feature_addition",
+    "repo": "pipeline",
+    "instruction": "Add a dry_run() method to Pipeline in src/pipeline/runner.py: it runs the reader, rules and transforms exactly like run() and returns the RunStats, but never writes to or closes the sink. A later run() must still work.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import ListSink\nsink = ListSink()\npipe = Pipeline(MemoryReader([(\"a\", \"1\"), (\"b\", \"2\"), (\"c\", \"3\")]), sink)\nstats = pipe.dry_run()\nassert stats.processed == 3 and len(sink.records) == 0\nassert pipe.run().processed == 3\nassert len(sink.records) == 3\nok = True\n"
+  },
+  {
+    "id": "pipeline-feature-05",
+    "klass": "feature_addition",
+    "repo": "pipeline",
+    "instruction": "Extend RetryPolicy in src/pipeline/retry.py with a default_value field (default None) and support on_give_up=\"default\": when attempts are exhausted in that mode, attempt() returns policy.default_value instead of raising ExhaustedRetries.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.errors import ExhaustedRetries\nfrom pipeline.retry import RetryPolicy, attempt\n\ndef fail():\n    raise ValueError(\"no\")\n\npolicy = RetryPolicy(max_attempts=1, on_give_up=\"default\", default_value=42)\nassert attempt(fail, policy) == 42\ntry:\n    attempt(fail, RetryPolicy(max_attempts=1))\n    raise AssertionError(\"expected ExhaustedRetries\")\nexcept ExhaustedRetries:\n    pass\nok = True\n"
+  },
+  {
+    "id": "pipeline-refactor-01",
+    "klass": "refactor",
+    "repo": "pipeline",
+    "instruction": "CsvReader.read in src/pipeline/readers.py does everything inline. Extract the per-row parsing into a helper method _parse_line(self, line, header) (returning a Record or None) and call it from read(). Behavior must be identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom pipeline.readers import CsvReader\nassert \"_parse_line\" in inspect.getsource(CsvReader)\nbatch = CsvReader(\"key,value,unit\\ncolour,red,spectral\\n\").read()\nassert batch.keys() == [\"colour\"]\nassert batch.records[0].meta == {\"unit\": \"spectral\"}\nok = True\n"
+  },
+  {
+    "id": "pipeline-refactor-02",
+    "klass": "refactor",
+    "repo": "pipeline",
+    "instruction": "The accepts_batches attribute on the Sink base class in src/pipeline/sinks.py is dead: nothing in src/ or tests/ reads it. Delete it and confirm the sinks still behave.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.records import Record\nfrom pipeline.sinks import CountingSink, ListSink, Sink\nassert not hasattr(Sink, \"accepts_batches\")\nsink = ListSink()\nsink.write(Record(\"a\", \"1\"))\nassert len(sink.records) == 1\ncounter = CountingSink()\ncounter.write(Record(\"a\", \"1\"))\nassert counter.count == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-refactor-03",
+    "klass": "refactor",
+    "repo": "pipeline",
+    "instruction": "Rename the SkipRecord exception in src/pipeline/errors.py to RecordSkipped and update every import and usage under src/ (transforms, validate, runner) and tests/ so the fixture suite passes with no SkipRecord name left behind.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport pipeline.errors as errors_module\nassert not hasattr(errors_module, \"SkipRecord\")\nfrom pipeline.errors import RecordSkipped\nfrom pipeline.records import Record\nfrom pipeline.transforms import drop_empty\ntry:\n    drop_empty()(Record(\"a\", \" \"))\n    raise AssertionError(\"expected RecordSkipped\")\nexcept RecordSkipped:\n    pass\ntests_text = open(os.path.join(root, \"tests\", \"test_transforms.py\")).read()\nassert \"SkipRecord\" not in tests_text\nok = True\n"
+  },
+  {
+    "id": "pipeline-api-01",
+    "klass": "api_signature_propagation",
+    "repo": "pipeline",
+    "instruction": "Add a strict keyword parameter (default False) to CsvReader in src/pipeline/readers.py: when True, a row with a different cell count than the header raises ConfigurationError. Lenient parsing (missing cells become empty strings) stays the default.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.errors import ConfigurationError\nfrom pipeline.readers import CsvReader\nbatch = CsvReader(\"key,value\\n1\\n\").read()\nassert batch.keys() == [\"1\"]\ntry:\n    CsvReader(\"key,value\\n1\\n\", strict=True).read()\n    raise AssertionError(\"expected ConfigurationError\")\nexcept ConfigurationError:\n    pass\nok = True\n"
+  },
+  {
+    "id": "pipeline-api-02",
+    "klass": "api_signature_propagation",
+    "repo": "pipeline",
+    "instruction": "Add a limit keyword parameter (default None) to Pipeline in src/pipeline/runner.py: when set, only the first limit records of the batch are transformed and written.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import ListSink\nsink = ListSink()\npipe = Pipeline(MemoryReader([(\"a\", \"1\"), (\"b\", \"2\"), (\"c\", \"3\")]), sink, limit=2)\nstats = pipe.run()\nassert stats.processed == 2 and [r.key for r in sink.records] == [\"a\", \"b\"]\nfull = Pipeline(MemoryReader([(\"a\", \"1\")]), ListSink()).run()\nassert full.processed == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-api-03",
+    "klass": "api_signature_propagation",
+    "repo": "pipeline",
+    "instruction": "Add a sep keyword parameter (default \"=\") to FileSink in src/pipeline/sinks.py controlling the key/value separator in written lines, and update any callers as needed so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport tempfile\nfrom pipeline.readers import CsvReader\nfrom pipeline.runner import Pipeline\nfrom pipeline.sinks import FileSink\nwith tempfile.TemporaryDirectory() as td:\n    path = os.path.join(td, \"out.txt\")\n    Pipeline(CsvReader(\"key,value\\na,1\\n\"), FileSink(path, sep=\": \")).run()\n    assert open(path).read().splitlines()[-1] == \"a: 1\"\n    other = os.path.join(td, \"out2.txt\")\n    Pipeline(CsvReader(\"key,value\\na,1\\n\"), FileSink(other)).run()\n    assert open(other).read().splitlines()[-1] == \"a=1\"\nok = True\n"
+  },
+  {
+    "id": "pipeline-api-04",
+    "klass": "api_signature_propagation",
+    "repo": "pipeline",
+    "instruction": "Add a strict keyword parameter (default False) to validate_batch in src/pipeline/validate.py: when True, a rule raising SkipRecord propagates instead of being captured in the skipped list. The default behavior is unchanged for existing callers.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.errors import SkipRecord\nfrom pipeline.records import Record, RecordBatch\nfrom pipeline.validate import require_key, validate_batch\nbatch = RecordBatch(\"b\", [Record(\"\", \"x\"), Record(\"a\", \"y\")])\nclean, skipped = validate_batch(batch, [require_key])\nassert len(clean) == 1 and skipped == [(\"\", \"missing key\")]\ntry:\n    validate_batch(batch, [require_key], strict=True)\n    raise AssertionError(\"expected SkipRecord\")\nexcept SkipRecord:\n    pass\nok = True\n"
+  },
+  {
+    "id": "pipeline-schema-01",
+    "klass": "schema_or_framework_change",
+    "repo": "pipeline",
+    "instruction": "Add a created_seq field (default 0) to the Record dataclass in src/pipeline/records.py, and make MemoryReader assign sequential created_seq values 1..n to the records it emits. Keep copy()/with_meta() consistent so the field survives transforms.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.records import Record\nassert Record(\"a\", \"x\").created_seq == 0\nbatch = MemoryReader([(\"a\", \"1\"), (\"b\", \"2\")]).read()\nassert [r.created_seq for r in batch.records] == [1, 2]\ncopied = batch.records[0].copy()\nassert copied.created_seq == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-schema-02",
+    "klass": "schema_or_framework_change",
+    "repo": "pipeline",
+    "instruction": "Add a batches field (default 0) to RunStats in src/pipeline/runner.py and have Pipeline.run set it to the number of batches written (always 1 today). Update RunStats users as needed so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.readers import MemoryReader\nfrom pipeline.runner import RunStats\nfrom pipeline.sinks import ListSink\nfrom pipeline.runner import Pipeline\nassert RunStats().batches == 0\nstats = Pipeline(MemoryReader([(\"a\", \"1\")]), ListSink()).run()\nassert stats.batches == 1\nok = True\n"
+  },
+  {
+    "id": "pipeline-schema-03",
+    "klass": "schema_or_framework_change",
+    "repo": "pipeline",
+    "instruction": "Give Record in src/pipeline/records.py a serialization contract: a to_dict() method returning exactly {key, value, meta} and a from_dict() classmethod restoring the record, and use them from at least one round-trip. meta must deep-copy rather than alias.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom pipeline.records import Record\nrecord = Record(\"a\", \"x\", meta={\"n\": 1})\nassert record.to_dict() == {\"key\": \"a\", \"value\": \"x\", \"meta\": {\"n\": 1}}\nrestored = Record.from_dict(record.to_dict())\nassert restored == record\nrestored.meta[\"n\"] = 2\nassert record.meta == {\"n\": 1}\nok = True\n"
+  },
+  {
+    "id": "notesrv-lookup-01",
+    "klass": "simple_lookup",
+    "repo": "notesrv",
+    "instruction": "Note.matches in src/notesrv/models.py only searches title and body. Extend it to also match the query against the note's tags (case-insensitively).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.models import Note\nnote = Note(title=\"T\", body=\"b\", tags=[\"urgent\", \"work\"])\nassert note.matches(\"URGENT\") is True\nassert note.matches(\"WORK\") is True\nassert note.matches(\"missing\") is False\nok = True\n"
+  },
+  {
+    "id": "notesrv-lookup-02",
+    "klass": "simple_lookup",
+    "repo": "notesrv",
+    "instruction": "Make is_authorized in src/notesrv/auth.py tolerate action casing: is_authorized(token, \"READ\") must behave exactly like \"read\". Unknown tokens still return False.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.auth import is_authorized\nassert is_authorized(\"tok-admin-001\", \"READ\") is True\nassert is_authorized(\"tok-admin-001\", \"Delete\") is True\nassert is_authorized(\"tok-reader-003\", \"WRITE\") is False\nassert is_authorized(\"bogus\", \"read\") is False\nok = True\n"
+  },
+  {
+    "id": "notesrv-cross-01",
+    "klass": "cross_file_bug",
+    "repo": "notesrv",
+    "instruction": "A successful DELETE dispatches as status 204 but still serializes an empty JSON object body. Fix dispatch in src/notesrv/server.py so a 204 response carries an empty body string while every other status keeps its JSON text.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.handlers import Handlers\nfrom notesrv.server import build_routes, dispatch\nhandlers = Handlers()\nroutes = build_routes(handlers)\nstatus, text = dispatch(routes, handlers, \"POST\", \"/notes\", '{\"title\": \"N1\"}', token=\"tok-admin-001\")\nassert status == 201\nstatus, text = dispatch(routes, handlers, \"DELETE\", \"/notes/1\", \"\", token=\"tok-admin-001\")\nassert status == 204, status\nassert text == \"\", text\nok = True\n"
+  },
+  {
+    "id": "notesrv-cross-02",
+    "klass": "cross_file_bug",
+    "repo": "notesrv",
+    "instruction": "Passing tags as a non-list (e.g. a plain string) into note creation or update silently mangles the tags instead of rejecting the payload. Make Note in src/notesrv/models.py raise NoteError when tags is not a list of strings, so handlers map it to a 422 response.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.handlers import Handlers\nfrom notesrv.models import Note, NoteError\ntry:\n    Note(title=\"t\", body=\"\", tags=\"work\")\n    raise AssertionError(\"expected NoteError\")\nexcept NoteError:\n    pass\nhandlers = Handlers()\nstatus, payload = handlers.handle_create(\"tok-admin-001\", {\"title\": \"t\", \"tags\": \"work\"})\nassert status == 422, status\nok = True\n"
+  },
+  {
+    "id": "notesrv-cross-03",
+    "klass": "cross_file_bug",
+    "repo": "notesrv",
+    "instruction": "POSTing to /notes/<id> (a path that only exists for GET/PUT/DELETE) reports 404 no-route. Make dispatch in src/notesrv/server.py return 405 with an 'method not allowed' error when the path matches a pattern registered only under other methods.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.handlers import Handlers\nfrom notesrv.server import build_routes, dispatch\nhandlers = Handlers()\nroutes = build_routes(handlers)\nstatus, text = dispatch(routes, handlers, \"POST\", \"/notes\", '{\"title\": \"N1\"}', token=\"tok-admin-001\")\nassert status == 201\nstatus, text = dispatch(routes, handlers, \"POST\", \"/notes/1\", \"{}\", token=\"tok-admin-001\")\nassert status == 405, status\nassert \"not allowed\" in text.lower(), text\nstatus, text = dispatch(routes, handlers, \"POST\", \"/totally/unknown\", \"{}\")\nassert status == 404, status\nok = True\n"
+  },
+  {
+    "id": "notesrv-feature-01",
+    "klass": "feature_addition",
+    "repo": "notesrv",
+    "instruction": "Add a search endpoint: a handle_search(token, query) handler in src/notesrv/handlers.py returning 200 with {'notes': [...]} from store.search, plus a GET /notes/search/<query> route in build_routes (src/notesrv/server.py) that dispatches to it.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport json as _json\nfrom notesrv.handlers import Handlers\nfrom notesrv.models import Note\nfrom notesrv.server import build_routes, dispatch\nhandlers = Handlers()\nhandlers.store.create(Note(title=\"Groceries\", body=\"milk\"))\nhandlers.store.create(Note(title=\"Retro\", body=\"sprint\", tags=[\"work\"]))\nroutes = build_routes(handlers)\nstatus, text = dispatch(routes, handlers, \"GET\", \"/notes/search/retro\", \"\", token=\"tok-admin-001\")\nassert status == 200, status\nassert [n[\"title\"] for n in _json.loads(text)[\"notes\"]] == [\"Retro\"]\nstatus, text = dispatch(routes, handlers, \"GET\", \"/notes/search/zzz\", \"\", token=\"tok-admin-001\")\nassert status == 200 and _json.loads(text)[\"notes\"] == []\nok = True\n"
+  },
+  {
+    "id": "notesrv-feature-02",
+    "klass": "feature_addition",
+    "repo": "notesrv",
+    "instruction": "Add an excerpt(length=40) method to Note in src/notesrv/models.py: the first length characters of the body, with '...' appended only when the body was actually truncated.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.models import Note\nnote = Note(title=\"t\", body=\"a\" * 50)\nassert note.excerpt() == \"a\" * 40 + \"...\"\nassert note.excerpt(length=5) == \"a\" * 5 + \"...\"\nassert Note(title=\"t\", body=\"hi\").excerpt() == \"hi\"\nok = True\n"
+  },
+  {
+    "id": "notesrv-feature-03",
+    "klass": "feature_addition",
+    "repo": "notesrv",
+    "instruction": "Add snapshot persistence to MemoryStore in src/notesrv/storage.py: a to_json() method returning a JSON string of all notes, and a from_json() classmethod restoring an equivalent store (ids, titles, bodies and tags preserved, next id continues after the highest).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.models import Note\nfrom notesrv.storage import MemoryStore\nstore = MemoryStore()\nstore.create(Note(title=\"One\", body=\"b1\"))\nstore.create(Note(title=\"Two\", body=\"b2\", tags=[\"w\"]))\nrestored = MemoryStore.from_json(store.to_json())\nassert [n.title for n in restored.list()] == [\"One\", \"Two\"]\nassert restored.get(2).tags == [\"w\"]\nthird = restored.create(Note(title=\"Three\", body=\"\"))\nassert third.note_id == 3\nok = True\n"
+  },
+  {
+    "id": "notesrv-refactor-01",
+    "klass": "refactor",
+    "repo": "notesrv",
+    "instruction": "Every Handlers method in src/notesrv/handlers.py repeats the require_token/exception-to-response dance. Extract a single helper method _authorized(self, token, action) that returns an error (status, payload) tuple or None, and use it from all five handlers. Behavior must be identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom notesrv.handlers import Handlers\nsource = inspect.getsource(Handlers)\nassert \"_authorized\" in source\nfor name in (\"handle_create\", \"handle_get\", \"handle_list\", \"handle_update\", \"handle_delete\"):\n    assert \"_authorized\" in inspect.getsource(getattr(Handlers, name)), name\nhandlers = Handlers()\nstatus, _ = handlers.handle_delete(\"tok-reader-003\", 1)\nassert status == 403\nok = True\n"
+  },
+  {
+    "id": "notesrv-refactor-02",
+    "klass": "refactor",
+    "repo": "notesrv",
+    "instruction": "The READ_ACTIONS constant in src/notesrv/server.py is dead (dispatch tests the method directly). Verify it is unused under src/ and tests/, then delete it.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.handlers import Handlers\nfrom notesrv.server import build_routes, dispatch\ntext = open(os.path.join(root, \"src\", \"notesrv\", \"server.py\")).read()\nassert \"READ_ACTIONS\" not in text\nhandlers = Handlers()\nroutes = build_routes(handlers)\nstatus, _ = dispatch(routes, handlers, \"GET\", \"/notes\", \"\", token=\"tok-admin-001\")\nassert status == 200\nok = True\n"
+  },
+  {
+    "id": "notesrv-api-01",
+    "klass": "api_signature_propagation",
+    "repo": "notesrv",
+    "instruction": "Add a limit keyword parameter (default None) to Handlers.handle_list in src/notesrv/handlers.py truncating the returned notes, and thread it through the dispatch GET /notes path. Existing callers are unaffected.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.handlers import Handlers\nfrom notesrv.models import Note\nhandlers = Handlers()\nhandlers.store.create(Note(title=\"One\", body=\"\"))\nhandlers.store.create(Note(title=\"Two\", body=\"\"))\nassert len(handlers.handle_list(\"tok-admin-001\")[1][\"notes\"]) == 2\nlimited = handlers.handle_list(\"tok-admin-001\", limit=1)[1][\"notes\"]\nassert [n[\"title\"] for n in limited] == [\"One\"]\nok = True\n"
+  },
+  {
+    "id": "notesrv-api-02",
+    "klass": "api_signature_propagation",
+    "repo": "notesrv",
+    "instruction": "Add a reverse keyword parameter (default False) to MemoryStore.list in src/notesrv/storage.py: when True the notes come back newest-first (descending id). The tag filter must keep working in both orders.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.models import Note\nfrom notesrv.storage import MemoryStore\nstore = MemoryStore()\nstore.create(Note(title=\"One\", body=\"\", tags=[\"a\"]))\nstore.create(Note(title=\"Two\", body=\"\", tags=[\"a\"]))\nassert [n.title for n in store.list(reverse=True)] == [\"Two\", \"One\"]\nassert [n.title for n in store.list()] == [\"One\", \"Two\"]\nassert [n.title for n in store.list(tag=\"a\", reverse=True)] == [\"Two\", \"One\"]\nok = True\n"
+  },
+  {
+    "id": "notesrv-api-03",
+    "klass": "api_signature_propagation",
+    "repo": "notesrv",
+    "instruction": "Add an indent keyword parameter (default None) to dumps in src/notesrv/jsonutil.py: when None the current compact sorted output is produced; when a number, delegate to json.dumps with that indent. Update callers as needed so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.jsonutil import dumps\nassert dumps({\"b\": 1, \"a\": 2}) == '{\"a\":2,\"b\":1}'\nassert dumps({\"a\": 1}, indent=2) == '{\\n  \"a\": 1\\n}'\nok = True\n"
+  },
+  {
+    "id": "notesrv-schema-01",
+    "klass": "schema_or_framework_change",
+    "repo": "notesrv",
+    "instruction": "Add a pinned field (default False) to the Note dataclass in src/notesrv/models.py, include it in to_dict() output and accept it in from_dict(). Notes without the field keep working everywhere.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.models import Note\nnote = Note(title=\"t\", body=\"b\", pinned=True)\nassert note.pinned is True\nassert note.to_dict()[\"pinned\"] is True\nassert Note.from_dict(note.to_dict()).pinned is True\nplain = Note(title=\"t\", body=\"\")\nassert plain.pinned is False\nassert \"pinned\" not in plain.to_dict() or plain.to_dict()[\"pinned\"] is False\nok = True\n"
+  },
+  {
+    "id": "notesrv-schema-02",
+    "klass": "schema_or_framework_change",
+    "repo": "notesrv",
+    "instruction": "Rename the 'id' key in Note.to_dict() output to 'note_id' and accept either 'note_id' (preferred) or the legacy 'id' in from_dict(). Update all consumers of the serialized form under src/ and tests/ so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.models import Note\nnote = Note(title=\"t\", body=\"b\")\nnote.note_id = 3\npayload = note.to_dict()\nassert payload[\"note_id\"] == 3 and \"id\" not in payload, payload\nrestored = Note.from_dict({\"title\": \"u\", \"body\": \"\", \"note_id\": 7})\nassert restored.note_id == 7\nlegacy = Note.from_dict({\"title\": \"u\", \"body\": \"\", \"id\": 9})\nassert legacy.note_id == 9\nok = True\n"
+  },
+  {
+    "id": "notesrv-schema-03",
+    "klass": "schema_or_framework_change",
+    "repo": "notesrv",
+    "instruction": "Change the error envelope in src/notesrv/jsonutil.py: error_response must return {'ok': False, 'error': message} instead of {'error': message}, and exception_to_response inherits the new shape. Update any consumers and tests so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.jsonutil import error_response, exception_to_response\nfrom notesrv.storage import NotFoundError\nassert error_response(404, \"nope\") == (404, {\"ok\": False, \"error\": \"nope\"})\nstatus, payload = exception_to_response(NotFoundError(\"1\"))\nassert status == 404 and payload[\"ok\"] is False and \"error\" in payload\nok = True\n"
+  },
+  {
+    "id": "notesrv-schema-04",
+    "klass": "schema_or_framework_change",
+    "repo": "notesrv",
+    "instruction": "Add a pattern field (default \"\") to the ResolvedRoute dataclass in src/notesrv/routing.py and populate it in RouteTable.resolve with the pattern that matched, so callers can see which route handled a path.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom notesrv.handlers import Handlers\nfrom notesrv.routing import ResolvedRoute, RouteTable\nfrom notesrv.server import build_routes\nassert ResolvedRoute(handler=None, params={}).pattern == \"\"\nroutes = build_routes(Handlers())\nresolved = routes.resolve(\"GET\", \"/notes/5\")\nassert resolved is not None and resolved.params == {\"note_id\": \"5\"}\nassert resolved.pattern == \"/notes/<note_id>\"\nok = True\n"
+  },
+  {
+    "id": "webledger-lookup-01",
+    "klass": "simple_lookup",
+    "repo": "webledger",
+    "instruction": "validate_date in src/webledger/validation.py only checks the shape. Also reject months outside 01-12 and days outside 01-31 with ValidationError.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.validation import validate_date\nvalidate_date(\"2024-06-30\")\nfor bad in (\"2024-13-01\", \"2024-00-10\", \"2024-03-00\", \"2024-03-32\"):\n    try:\n        validate_date(bad)\n        raise AssertionError(f\"expected ValidationError for {bad}\")\n    except Exception as exc:\n        assert type(exc).__name__ == \"ValidationError\", exc\nok = True\n"
+  },
+  {
+    "id": "webledger-lookup-02",
+    "klass": "simple_lookup",
+    "repo": "webledger",
+    "instruction": "Account in src/webledger/accounts.py stores names verbatim. Strip surrounding whitespace from the name in __post_init__ so '  Cash  ' is stored as 'Cash'.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import Account, AccountType\naccount = Account(\"100\", \"  Cash  \", AccountType.ASSET)\nassert account.name == \"Cash\"\nok = True\n"
+  },
+  {
+    "id": "webledger-lookup-03",
+    "klass": "simple_lookup",
+    "repo": "webledger",
+    "instruction": "Write a substantive docstring (60+ characters) for both from_cents and is_zero in src/webledger/money.py explaining the cents convention. Behavior must not change.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.money import from_cents, is_zero\nfor fn in (from_cents, is_zero):\n    assert fn.__doc__, fn.__name__\n    assert len(fn.__doc__) > 60, (fn.__name__, fn.__doc__)\nassert from_cents(1250) == 12.5 and is_zero(0)\nok = True\n"
+  },
+  {
+    "id": "webledger-lookup-04",
+    "klass": "simple_lookup",
+    "repo": "webledger",
+    "instruction": "parse_entries in src/webledger/importers.py crashes with a bare ValueError on unparseable amounts. Wrap the amount conversion so a bad amount line raises the ledger's ValidationError instead.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.importers import parse_entries\nfrom webledger.validation import ValidationError\nchart = ChartOfAccounts().default_chart()\ntry:\n    parse_entries(\"2024-03-01 | m\\nabc debit 500\\nabc credit 100\\n\", chart)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\nentries = parse_entries(\"2024-03-01 | m\\n32.00 debit 500\\n32.00 credit 100\\n\", chart)\nassert len(entries) == 1\nok = True\n"
+  },
+  {
+    "id": "webledger-cross-01",
+    "klass": "cross_file_bug",
+    "repo": "webledger",
+    "instruction": "Journal.post_simple in src/webledger/journal.py posts entries with never-validated dates even though validation.validate_date exists. Validate the date (raising ValidationError) inside post_simple so malformed dates cannot enter the journal directly or via PeriodBook.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.validation import ValidationError\njournal = Journal(ChartOfAccounts().default_chart())\ntry:\n    journal.post_simple(\"2024-3-1\", \"m\", \"100\", \"400\", 500)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\njournal.post_simple(\"2024-03-01\", \"m\", \"100\", \"400\", 500)\nassert len(journal.entries()) == 1\nok = True\n"
+  },
+  {
+    "id": "webledger-cross-02",
+    "klass": "cross_file_bug",
+    "repo": "webledger",
+    "instruction": "parse_csv_lines in src/webledger/importers.py never checks account numbers against the chart, unlike parse_entries. Give it a required chart parameter and raise ValidationError on unknown accounts, updating its callers and tests so the fixture suite passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.importers import parse_csv_lines\nfrom webledger.validation import ValidationError\nchart = ChartOfAccounts().default_chart()\nentries = parse_csv_lines(\"2024-03-03,fee,500,100,750\\n\", chart)\nassert len(entries) == 1 and entries[0].total_debits == 750\ntry:\n    parse_csv_lines(\"2024-03-03,fee,500,777,750\\n\", chart)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\nok = True\n"
+  },
+  {
+    "id": "webledger-cross-03",
+    "klass": "cross_file_bug",
+    "repo": "webledger",
+    "instruction": "PeriodBook.open_period in src/webledger/fiscal.py happily creates overlapping periods, making assert_postable ambiguous. Raise ValidationError when a new period's date range overlaps any existing period.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.fiscal import PeriodBook\nfrom webledger.journal import Journal\nfrom webledger.validation import ValidationError\nbook = PeriodBook(Journal(ChartOfAccounts().default_chart()))\nbook.open_period(\"2024-03\", \"2024-03-01\", \"2024-03-31\")\ntry:\n    book.open_period(\"2024-Q1\", \"2024-01-01\", \"2024-03-31\")\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\nbook.open_period(\"2024-04\", \"2024-04-01\", \"2024-04-30\")\nassert set(book.periods) == {\"2024-03\", \"2024-04\"}\nok = True\n"
+  },
+  {
+    "id": "webledger-cross-04",
+    "klass": "cross_file_bug",
+    "repo": "webledger",
+    "instruction": "render_trial_balance in src/webledger/reports.py formats money directly instead of using ChartOfAccounts.total_for, and omits a totals line. Append a 'TOTAL' row computed via chart.total_for over the trial balance accounts so the report reconciles.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.reports import render_trial_balance\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-02\", \"sale\", \"110\", \"400\", 15000)\njournal.post_simple(\"2024-03-05\", \"supplies\", \"500\", \"100\", 3200)\nreport = render_trial_balance(journal, journal.chart)\nlines = report.splitlines()\nassert lines[-1].startswith(\"TOTAL\"), lines\nassert \"0.00\" in lines[-1], lines\nok = True\n"
+  },
+  {
+    "id": "webledger-cross-05",
+    "klass": "cross_file_bug",
+    "repo": "webledger",
+    "instruction": "parse_entries in src/webledger/importers.py duplicates money conversion with its own int(round(float(...)*100)) instead of the ledger's money.to_cents. Convert it to use to_cents so rounding rules live in one place.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.importers import parse_entries\nsource = inspect.getsource(parse_entries)\nassert \"to_cents\" in source, source\nassert \"round(float\" not in source, source\nchart = ChartOfAccounts().default_chart()\nentries = parse_entries(\"2024-03-01 | m\\n32.00 debit 500\\n32.00 credit 100\\n\", chart)\nassert entries[0].total_debits == 3200\nok = True\n"
+  },
+  {
+    "id": "webledger-feature-01",
+    "klass": "feature_addition",
+    "repo": "webledger",
+    "instruction": "Add an entry_count property and a last_entry() method to Journal in src/webledger/journal.py: the number of posted entries and the most recent one (None when the journal is empty).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\njournal = Journal(ChartOfAccounts().default_chart())\nassert journal.entry_count == 0 and journal.last_entry() is None\njournal.post_simple(\"2024-03-01\", \"first\", \"100\", \"400\", 500)\njournal.post_simple(\"2024-03-02\", \"second\", \"100\", \"400\", 300)\nassert journal.entry_count == 2\nassert journal.last_entry().memo == \"second\"\nok = True\n"
+  },
+  {
+    "id": "webledger-feature-02",
+    "klass": "feature_addition",
+    "repo": "webledger",
+    "instruction": "Add a module-level function is_debit_normal(account_type) to src/webledger/accounts.py: True for ASSET and EXPENSE, False for the other account types.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import AccountType, is_debit_normal\nassert is_debit_normal(AccountType.ASSET) is True\nassert is_debit_normal(AccountType.EXPENSE) is True\nassert is_debit_normal(AccountType.INCOME) is False\nassert is_debit_normal(AccountType.LIABILITY) is False\nassert is_debit_normal(AccountType.EQUITY) is False\nok = True\n"
+  },
+  {
+    "id": "webledger-feature-03",
+    "klass": "feature_addition",
+    "repo": "webledger",
+    "instruction": "Add a ledger_text(account_number) method to Journal in src/webledger/journal.py returning one line per entry touching the account, formatted 'date memo amount' (amount formatted with money.format_amount, debit-positive).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-02\", \"sale\", \"110\", \"400\", 15000)\njournal.post_simple(\"2024-03-05\", \"supplies\", \"500\", \"100\", 3200)\ntext = journal.ledger_text(\"110\")\nlines = text.splitlines()\nassert lines == [\"2024-03-02 sale 150.00\"], lines\nassert \"supplies\" in journal.ledger_text(\"500\")\nassert journal.ledger_text(\"999\") == \"\"\nok = True\n"
+  },
+  {
+    "id": "webledger-feature-04",
+    "klass": "feature_addition",
+    "repo": "webledger",
+    "instruction": "Add open_periods() and closed_periods() methods to PeriodBook in src/webledger/fiscal.py returning the period names in each state, sorted.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.fiscal import PeriodBook\nfrom webledger.journal import Journal\nbook = PeriodBook(Journal(ChartOfAccounts().default_chart()))\nbook.open_period(\"2024-03\", \"2024-03-01\", \"2024-03-31\")\nbook.open_period(\"2024-04\", \"2024-04-01\", \"2024-04-30\")\nbook.close_period(\"2024-04\")\nassert book.open_periods() == [\"2024-03\"]\nassert book.closed_periods() == [\"2024-04\"]\nok = True\n"
+  },
+  {
+    "id": "webledger-feature-05",
+    "klass": "feature_addition",
+    "repo": "webledger",
+    "instruction": "Add balance_sheet(journal) to src/webledger/reports.py returning a dict with keys 'assets', 'liabilities', 'equity', 'income', 'expenses': the net sums by account type across the journal (assets debit-positive, income as credit minus debit, expenses as debit minus credit).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.reports import balance_sheet\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-02\", \"sale\", \"110\", \"400\", 15000)\njournal.post_simple(\"2024-03-05\", \"supplies\", \"500\", \"100\", 3200)\nsheet = balance_sheet(journal)\nassert sheet[\"assets\"] == 15000 - 3200, sheet\nassert sheet[\"income\"] == 15000, sheet\nassert sheet[\"expenses\"] == 3200, sheet\nassert sheet[\"liabilities\"] == 0 and sheet[\"equity\"] == 0, sheet\nok = True\n"
+  },
+  {
+    "id": "webledger-refactor-01",
+    "klass": "refactor",
+    "repo": "webledger",
+    "instruction": "Account-existence checking is duplicated between validate_entry in src/webledger/validation.py and entry_chart_check in src/webledger/importers.py. Extract a shared assert_accounts_exist(lines, chart) into validation.py, use it from both, and keep all error messages and behavior identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom webledger import importers, validation\nassert \"def assert_accounts_exist\" in inspect.getsource(validation)\nassert \"assert_accounts_exist\" in inspect.getsource(importers)\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.entries import EntryLine, JournalEntry\nfrom webledger.validation import ValidationError\nchart = ChartOfAccounts().default_chart()\ntry:\n    validation.assert_accounts_exist([EntryLine(\"777\", debit_cents=5)], chart)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError as exc:\n    assert \"777\" in str(exc)\nok = True\n"
+  },
+  {
+    "id": "webledger-refactor-02",
+    "klass": "refactor",
+    "repo": "webledger",
+    "instruction": "The DEBIT_NORMAL constant in src/webledger/accounts.py is dead: nothing in src/ or tests/ references it. Verify and delete it without touching AccountType.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger import accounts\nassert not hasattr(accounts, \"DEBIT_NORMAL\")\nassert accounts.AccountType.ASSET.value == \"asset\"\nchart = accounts.ChartOfAccounts().default_chart()\nassert chart.has(\"100\") and chart.has(\"500\")\nok = True\n"
+  },
+  {
+    "id": "webledger-refactor-03",
+    "klass": "refactor",
+    "repo": "webledger",
+    "instruction": "Rename Journal.post_simple to post_two_line in src/webledger/journal.py and update every caller (fiscal.py and the test suite) so the fixture suite passes with the new name only.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nassert \"post_simple\" not in Journal.__dict__\nassert \"post_two_line\" in Journal.__dict__\nfiscal_text = open(os.path.join(root, \"src\", \"webledger\", \"fiscal.py\")).read()\nassert \"post_simple\" not in fiscal_text\ntests_text = open(os.path.join(root, \"tests\", \"test_webledger.py\")).read()\nassert \"post_simple\" not in tests_text\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_two_line(\"2024-03-01\", \"m\", \"100\", \"400\", 500)\nassert len(journal.entries()) == 1\nok = True\n"
+  },
+  {
+    "id": "webledger-refactor-04",
+    "klass": "refactor",
+    "repo": "webledger",
+    "instruction": "trial_balance and income_statement in src/webledger/reports.py both hand-roll the entry/line walk. Extract a module-level _iter_lines(journal) helper yielding (entry, line) pairs and use it from both reports. Behavior must be identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom webledger import reports\nsource = inspect.getsource(reports)\nassert \"def _iter_lines\" in source, source\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-02\", \"sale\", \"110\", \"400\", 15000)\njournal.post_simple(\"2024-03-05\", \"supplies\", \"500\", \"100\", 3200)\nassert reports.trial_balance(journal)[\"110\"] == 15000\nassert reports.income_statement(journal)[\"net\"] == 11800\nok = True\n"
+  },
+  {
+    "id": "webledger-api-01",
+    "klass": "api_signature_propagation",
+    "repo": "webledger",
+    "instruction": "Add a skip_validation keyword parameter (default False) to Journal.post in src/webledger/journal.py: when True the entry is posted without running validate_entry (for trusted importers). The default path keeps validating.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.entries import EntryLine, JournalEntry\nfrom webledger.journal import Journal\nfrom webledger.validation import ValidationError\njournal = Journal(ChartOfAccounts().default_chart())\nunbalanced = JournalEntry(\n    date=\"2024-03-01\",\n    memo=\"m\",\n    lines=[EntryLine(\"100\", debit_cents=500), EntryLine(\"400\", credit_cents=400)],\n)\ntry:\n    journal.post(unbalanced)\n    raise AssertionError(\"expected ValidationError\")\nexcept ValidationError:\n    pass\njournal.post(unbalanced, skip_validation=True)\nassert len(journal.entries()) == 1\nok = True\n"
+  },
+  {
+    "id": "webledger-api-02",
+    "klass": "api_signature_propagation",
+    "repo": "webledger",
+    "instruction": "Add a with_sign keyword parameter (default False) to format_amount in src/webledger/money.py: when True positive amounts get a leading '+'. Negative rendering and the default are unchanged; update callers as needed.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.money import format_amount\nassert format_amount(500, with_sign=True) == \"+5.00\"\nassert format_amount(-500, with_sign=True) == \"-5.00\"\nassert format_amount(500) == \"5.00\"\nassert format_amount(-500) == \"-5.00\"\nok = True\n"
+  },
+  {
+    "id": "webledger-api-03",
+    "klass": "api_signature_propagation",
+    "repo": "webledger",
+    "instruction": "Add an include_zero keyword parameter (default False) to trial_balance in src/webledger/reports.py: when True, accounts that touched entries but net to zero are included with balance 0. Update callers as needed.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.journal import Journal\nfrom webledger.reports import trial_balance\njournal = Journal(ChartOfAccounts().default_chart())\njournal.post_simple(\"2024-03-01\", \"a\", \"100\", \"400\", 500)\njournal.post_simple(\"2024-03-02\", \"b\", \"400\", \"100\", 500)\nassert \"100\" not in trial_balance(journal)\nassert trial_balance(journal, include_zero=True)[\"100\"] == 0\nok = True\n"
+  },
+  {
+    "id": "webledger-api-04",
+    "klass": "api_signature_propagation",
+    "repo": "webledger",
+    "instruction": "Add a name_contains keyword parameter (default None) to ChartOfAccounts.by_type in src/webledger/accounts.py filtering accounts by a case-insensitive name substring. Existing two-argument calls are unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import AccountType, ChartOfAccounts\nchart = ChartOfAccounts().default_chart()\nassert [a.number for a in chart.by_type(AccountType.ASSET)] == [\"100\", \"110\"]\nassert [a.number for a in chart.by_type(AccountType.ASSET, name_contains=\"cash\")] == [\"100\"]\nassert [a.number for a in chart.by_type(AccountType.ASSET, name_contains=\"RECEIVABLE\")] == [\"110\"]\nassert chart.by_type(AccountType.INCOME, name_contains=\"zzz\") == []\nok = True\n"
+  },
+  {
+    "id": "webledger-schema-01",
+    "klass": "schema_or_framework_change",
+    "repo": "webledger",
+    "instruction": "Add a reference field (default \"\") to the JournalEntry dataclass in src/webledger/entries.py for external document references, and thread it through Journal.post_simple as an optional keyword (default \"\") so postings can carry it.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.accounts import ChartOfAccounts\nfrom webledger.entries import EntryLine, JournalEntry\nfrom webledger.journal import Journal\nassert JournalEntry(date=\"2024-01-01\", memo=\"m\", lines=[]).reference == \"\"\nentry = JournalEntry(date=\"2024-01-01\", memo=\"m\", lines=[], reference=\"INV-1\")\nassert entry.reference == \"INV-1\"\njournal = Journal(ChartOfAccounts().default_chart())\nposted = journal.post_simple(\"2024-03-01\", \"m\", \"100\", \"400\", 500, reference=\"INV-2\")\nassert posted.reference == \"INV-2\"\nok = True\n"
+  },
+  {
+    "id": "webledger-schema-02",
+    "klass": "schema_or_framework_change",
+    "repo": "webledger",
+    "instruction": "Add a memo field (default \"\") to the EntryLine dataclass in src/webledger/entries.py, and make parse_csv_lines in src/webledger/importers.py populate each line's memo with the row's entry memo.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom webledger.entries import EntryLine\nfrom webledger.importers import parse_csv_lines\nassert EntryLine(\"100\", debit_cents=5, memo=\"wire fee\").memo == \"wire fee\"\nassert EntryLine(\"100\", credit_cents=5).memo == \"\"\nentries = parse_csv_lines(\"2024-03-03,fee,500,100,750\\n\")\nassert entries[0].lines[0].memo == \"fee\"\nassert entries[0].lines[1].memo == \"fee\"\nok = True\n"
+  },
+  {
+    "id": "biglib-lookup-01",
+    "klass": "simple_lookup",
+    "repo": "biglib",
+    "instruction": "In src/biglib/numbers.py, distribute() puts the remainder on the left but that is undocumented and surprising. Move the remainder to the right (distribute(7, 3) == [2, 2, 3]) and update the docstring to say so.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.numbers import distribute\nassert distribute(7, 3) == [2, 2, 3]\nassert distribute(5, 2) == [2, 3]\nassert distribute(6, 3) == [2, 2, 2]\nassert \"left\" not in distribute.__doc__.lower()\nok = True\n"
+  },
+  {
+    "id": "biglib-lookup-02",
+    "klass": "simple_lookup",
+    "repo": "biglib",
+    "instruction": "display_name in src/biglib/strings.py capitalizes only the first character. Make it capitalize every whitespace-separated word (leaving the rest of each word untouched).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.strings import display_name\nassert display_name(\"hello world\") == \"Hello World\"\nassert display_name(\"  aBC   dEF \") == \"ABC DEF\"\nassert display_name(\"\") == \"\"\nok = True\n"
+  },
+  {
+    "id": "biglib-lookup-03",
+    "klass": "simple_lookup",
+    "repo": "biglib",
+    "instruction": "column_totals in src/biglib/tables.py silently zero-fills ragged rows even though its docstring says so only as a side effect. Make it raise ValueError when rows have differing lengths instead, and update the docstring and any tests.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.tables import column_totals\nassert column_totals([[1, 2], [3, 4]]) == [4, 6]\nassert column_totals([]) == []\ntry:\n    column_totals([[1, 2], [3]])\n    raise AssertionError(\"expected ValueError\")\nexcept ValueError:\n    pass\nok = True\n"
+  },
+  {
+    "id": "biglib-cross-01",
+    "klass": "cross_file_bug",
+    "repo": "biglib",
+    "instruction": "asset_name in src/biglib/strings.py converts via camel_case, which glues words together before filename normalization ('quarterly summary' becomes 'quarterlysummary.txt'). Use the word-preserving kebab path from biglib.large instead, so asset_name('quarterly summary') == 'quarterly-summary.txt', and update the test that pins the old behavior.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.strings import asset_name\nassert asset_name(\"quarterly summary\") == \"quarterly-summary.txt\"\nassert asset_name(\"Q3 Report.PDF\") == \"q3-report.pdf\"\ntests_text = open(os.path.join(root, \"tests\", \"test_biglib.py\")).read()\nassert \"quarterlysummary.txt\" not in tests_text\nok = True\n"
+  },
+  {
+    "id": "biglib-cross-02",
+    "klass": "cross_file_bug",
+    "repo": "biglib",
+    "instruction": "display_name in src/biglib/strings.py truncates mid-word when the text exceeds max_length. When truncation is needed, cut back to the last word boundary that fits (dropping the trailing partial word) before returning.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.strings import display_name\nassert display_name(\"hello brave world\", max_length=8) == \"Hello\"\nassert display_name(\"hello brave world\", max_length=11) == \"Hello brave\"\nassert display_name(\"abcdefgh\", max_length=5) == \"Abcde\"\nassert display_name(\"hi there\", max_length=20) == \"Hi there\"\nok = True\n"
+  },
+  {
+    "id": "biglib-feature-01",
+    "klass": "feature_addition",
+    "repo": "biglib",
+    "instruction": "Add a stdev(values) function to src/biglib/stats.py returning the population standard deviation (square root of variance); it must raise ValueError for fewer than two values, like variance does.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.stats import stdev\nassert stdev([0, 0, 10, 10]) == 5.0\nassert abs(stdev([2, 4, 4, 4, 5, 5, 7, 9]) - 2.0) < 1e-9\ntry:\n    stdev([1])\n    raise AssertionError(\"expected ValueError\")\nexcept ValueError:\n    pass\nok = True\n"
+  },
+  {
+    "id": "biglib-feature-02",
+    "klass": "feature_addition",
+    "repo": "biglib",
+    "instruction": "Add render_csv(headers, rows) to src/biglib/tables.py producing CSV text (comma-separated, one line per row) with proper double-quote escaping: cells containing commas or quotes are wrapped in quotes (internal quotes doubled).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.tables import render_csv\nassert render_csv([\"a\", \"b\"], [[\"1\", \"x,y\"]]) == 'a,b\\n1,\"x,y\"'\nassert render_csv([\"a\"], [['say \"hi' ' there now']]) == 'a\\n\"say \"\"hi there now\"'\nassert render_csv([\"a\"], [[\"plain\"]]) == \"a\\nplain\"\nok = True\n"
+  },
+  {
+    "id": "biglib-refactor-01",
+    "klass": "refactor",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, legacy_wrap duplicates wrap_text's greedy algorithm. Reimplement legacy_wrap as a thin delegation to wrap_text, preserving its exact output for all inputs.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom biglib import large\nsource = inspect.getsource(large.legacy_wrap)\nassert \"wrap_text(\" in source, source\nassert large.legacy_wrap(\"a bb ccc\", 3) == \"a\\nbb\\nccc\"\nassert large.legacy_wrap(\"one two three\", 7) == large.wrap_text(\"one two three\", 7)\nok = True\n"
+  },
+  {
+    "id": "biglib-refactor-02",
+    "klass": "refactor",
+    "repo": "biglib",
+    "instruction": "Rename the SEP_RE constant in src/biglib/large.py to WORD_SPLIT_RE and update every use within the module (and anywhere else it is imported) so no SEP_RE reference remains.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib import large\nassert not hasattr(large, \"SEP_RE\")\nassert hasattr(large, \"WORD_SPLIT_RE\")\nassert large.slugify(\"Hello World\") == \"hello-world\"\ntext = open(os.path.join(root, \"src\", \"biglib\", \"large.py\")).read()\nassert \"SEP_RE\" not in text\nok = True\n"
+  },
+  {
+    "id": "biglib-refactor-03",
+    "klass": "refactor",
+    "repo": "biglib",
+    "instruction": "pad_left, pad_right and pad_center in src/biglib/large.py repeat the same padding call three times. Extract a single private helper _pad(text, width, fill, align) and route all three public functions through it, keeping behavior identical.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nimport inspect\nfrom biglib import large\nassert \"def _pad\" in inspect.getsource(large)\nfor name in (\"pad_left\", \"pad_right\", \"pad_center\"):\n    assert \"_pad(\" in inspect.getsource(getattr(large, name)), name\nassert large.pad_left(\"7\", 3) == \"  7\"\nassert large.pad_right(\"7\", 3, \".\") == \"7..\"\nassert large.pad_center(\"hi\", 6, \"*\") == \"**hi**\"\nok = True\n"
+  },
+  {
+    "id": "biglib-api-01",
+    "klass": "api_signature_propagation",
+    "repo": "biglib",
+    "instruction": "Add a separator keyword parameter (default \"-\") to slugify in src/biglib/large.py controlling the joining character, and update any internal callers so they keep the dash default.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import slugify\nassert slugify(\"Hello World\", separator=\"_\") == \"hello_world\"\nassert slugify(\"Hello World\") == \"hello-world\"\nassert slugify(\"Hello, World! 2024\", separator=\"+\") == \"hello+world+2024\"\nok = True\n"
+  },
+  {
+    "id": "biglib-api-02",
+    "klass": "api_signature_propagation",
+    "repo": "biglib",
+    "instruction": "Add a break_long_words keyword parameter (default True) to wrap_text in src/biglib/large.py: when False, words longer than the width are kept intact on their own line instead of being split. Default behavior must be byte-identical for existing callers.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import wrap_text\nassert wrap_text(\"abcdefgh x\", 5, break_long_words=False) == \"abcdefgh\\nx\"\nassert wrap_text(\"abcdefgh x\", 5) == \"abcdefgh\\nx\"\nassert wrap_text(\"one two three four\", 7) == \"one two\\nthree\\nfour\"\nok = True\n"
+  },
+  {
+    "id": "biglib-api-03",
+    "klass": "api_signature_propagation",
+    "repo": "biglib",
+    "instruction": "Add an ellipsis keyword parameter (default None) to truncate in src/biglib/large.py: when given and the text exceeds the limit, the result is truncated so that the ellipsis fits within limit characters. Without it, hard truncation is unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import truncate\nassert truncate(\"abcdef\", 5, ellipsis=\"...\") == \"ab...\"\nassert truncate(\"abcdef\", 5) == \"abcde\"\nassert truncate(\"abcdef\", 3) == \"abc\"\nassert truncate(\"abc\", 5, ellipsis=\"...\") == \"abc\"\nok = True\n"
+  },
+  {
+    "id": "biglib-api-04",
+    "klass": "api_signature_propagation",
+    "repo": "biglib",
+    "instruction": "Add a keep_blank keyword parameter (default False) to parse_query_string in src/biglib/large.py: by default pairs with an empty value are dropped; with keep_blank=True they are kept with empty string values. Update callers as needed.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import parse_query_string\nassert parse_query_string(\"a=1&b=\") == {\"a\": \"1\"}\nassert parse_query_string(\"a=1&b=\", keep_blank=True) == {\"a\": \"1\", \"b\": \"\"}\nassert parse_query_string(\"a=1&b=2\") == {\"a\": \"1\", \"b\": \"2\"}\nok = True\n"
+  },
+  {
+    "id": "biglib-api-05",
+    "klass": "api_signature_propagation",
+    "repo": "biglib",
+    "instruction": "Add an include_variance keyword parameter (default True) to summarize in src/biglib/stats.py: when False the returned dict omits the 'variance' key. Existing calls are unchanged.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.stats import summarize\nassert summarize([1, 2, 3, 4], include_variance=False) == {\"mean\": 2.5, \"median\": 2.5}\nassert summarize([1, 2, 3, 4]) == {\"mean\": 2.5, \"median\": 2.5, \"variance\": 1.25}\nok = True\n"
+  },
+  {
+    "id": "biglib-schema-01",
+    "klass": "schema_or_framework_change",
+    "repo": "biglib",
+    "instruction": "TextBuffer in src/biglib/large.py gains an iteration contract: add __iter__ yielding its lines and a lines property returning the current lines as a new list.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import TextBuffer\nbuf = TextBuffer(\"a\\nb\")\nassert list(buf) == [\"a\", \"b\"]\nassert buf.lines == [\"a\", \"b\"]\nbuf.insert_line(1, \"1.5\")\nassert buf.lines == [\"a\", \"1.5\", \"b\"]\nok = True\n"
+  },
+  {
+    "id": "biglib-schema-02",
+    "klass": "schema_or_framework_change",
+    "repo": "biglib",
+    "instruction": "Give TextBuffer in src/biglib/large.py a readonly constructor flag (default False): when set, insert_line and replace_line raise RuntimeError('buffer is readonly') instead of mutating.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import TextBuffer\nfrozen = TextBuffer(\"x\", readonly=True)\ntry:\n    frozen.insert_line(0, \"y\")\n    raise AssertionError(\"expected RuntimeError\")\nexcept RuntimeError as exc:\n    assert \"readonly\" in str(exc)\nnormal = TextBuffer(\"x\")\nnormal.insert_line(0, \"y\")\nassert normal.text() == \"y\\nx\"\nok = True\n"
+  },
+  {
+    "id": "biglib-schema-03",
+    "klass": "schema_or_framework_change",
+    "repo": "biglib",
+    "instruction": "Change summarize in src/biglib/stats.py to return a new Summary dataclass (fields mean, median, variance) instead of a dict, and update its consumers plus tests so the fixture suite passes with the new return type.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.stats import Summary, summarize\nsummary = summarize([1, 2, 3, 4])\nassert isinstance(summary, Summary)\nassert summary.mean == 2.5 and summary.median == 2.5 and summary.variance == 1.25\nok = True\n"
+  },
+  {
+    "id": "biglib-large-01",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In the large module src/biglib/large.py, format_ingest_label only capitalizes the first character of the whole label. Find it and make it capitalize the first letter of every whitespace-separated word instead.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import format_ingest_label\nassert format_ingest_label(\"hello world\") == \"Hello World\"\nassert format_ingest_label(\"  ingest PREVIEW text \") == \"Ingest Preview Text\"\nassert format_ingest_label(\"\") == \"\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-02",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, locate count_index_tokens and make it ignore the common stopwords 'the', 'a' and 'of' (case-insensitive) when counting whitespace-separated tokens.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import count_index_tokens\nassert count_index_tokens(\"the cat and a dog\") == 3\nassert count_index_tokens(\"The of a\") == 0\nassert count_index_tokens(\"state-of-the-art\") == 1\nassert count_index_tokens(\"\") == 0\nok = True\n"
+  },
+  {
+    "id": "biglib-large-03",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, is_notify_empty treats separator-only strings like ' - _ ' as non-empty because it only strips whitespace. Make it return True for text containing only whitespace, dashes and underscores.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import is_notify_empty\nassert is_notify_empty(\" - _ \") is True\nassert is_notify_empty(\"-__-\") is True\nassert is_notify_empty(\"\") is True\nassert is_notify_empty(\"ok\") is False\nassert is_notify_empty(\"a-b\") is False\nok = True\n"
+  },
+  {
+    "id": "biglib-large-04",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, strip_archive_prefix matches its prefix case-sensitively. Make the prefix comparison case-insensitive so 'Archive: log' with prefix 'archive:' is stripped.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import strip_archive_prefix\nassert strip_archive_prefix(\"Archive: log\", \"archive:\") == \" log\"\nassert strip_archive_prefix(\"ARCHIVE: log\", \"archive:\") == \" log\"\nassert strip_archive_prefix(\"archive:log\", \"archive:\") == \"log\"\nassert strip_archive_prefix(\"keep: log\", \"archive:\") == \"keep: log\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-05",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, append_tagging_suffix produces doubled separators when the text ends with a dash and the suffix starts with one. Collapse the boundary so only a single separator remains.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import append_tagging_suffix\nassert append_tagging_suffix(\"done-\", \"-x\") == \"done-x\"\nassert append_tagging_suffix(\"done\", \"-x\") == \"done-x\"\nassert append_tagging_suffix(\"done-\", \"x\") == \"done-x\"\nassert append_tagging_suffix(\"done-x\", \"-x\") == \"done-x\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-06",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, the IngestPreview class splits on underscores via the shared regex, destroying snake_case words. Change only IngestPreview.split so it splits on whitespace and hyphens but preserves underscores.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import IngestPreview, snake_case\npreview = IngestPreview()\nassert preview.build(\"a_b c\") == \"a_b-c\"\nassert preview.split(\"hello-world two\") == [\"hello\", \"world\", \"two\"]\nassert preview.count(\"a_b\") == 1\nassert snake_case(\"Hello World\") == \"hello_world\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-07",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, normalize_digest leaves a leading '#' marker in place. Strip one leading '#' (plus following whitespace) as part of its normalization.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import normalize_digest\nassert normalize_digest(\"# Title Here\") == \"title here\"\nassert normalize_digest(\"#Title\") == \"title\"\nassert normalize_digest(\"plain text\") == \"plain text\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-08",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "Somewhere in the big module src/biglib/large.py there is a dead helper named unused_unescape that nothing calls. Delete it and remove the test assertion that pins it in tests/test_biglib.py so the suite still passes.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib import large\nassert not hasattr(large, \"unused_unescape\")\nassert hasattr(large, \"legacy_wrap\") and hasattr(large, \"old_slugify\")\ntests_text = open(os.path.join(root, \"tests\", \"test_biglib.py\")).read()\nassert \"unused_unescape\" not in tests_text\nok = True\n"
+  },
+  {
+    "id": "biglib-large-09",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, truncate silently accepts negative limits (Python slicing makes truncate('abc', -1) return 'ab'). Raise ValueError for negative limits instead.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib import large\ntry:\n    large.truncate(\"abc\", -1)\n    raise AssertionError(\"expected ValueError\")\nexcept ValueError:\n    pass\nassert large.truncate(\"abc\", 2) == \"ab\"\nassert large.truncate(\"abc\", 10) == \"abc\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-10",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, parse_query_string keeps '+' literal in values. Decode '+' as a space in values (query-string convention) while leaving keys untouched.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import parse_query_string\nassert parse_query_string(\"q=a+b\")[\"q\"] == \"a b\"\nassert parse_query_string(\"x+y=1\")[\"x+y\"] == \"1\"\nassert parse_query_string(\"a=1&b=2\") == {\"a\": \"1\", \"b\": \"2\"}\nok = True\n"
+  },
+  {
+    "id": "biglib-large-11",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, TextBuffer.replace_line lets list's generic IndexError escape. Give out-of-range replacements a precise error message containing 'index <n> out of range' (e.g. 'index 99 out of range').",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import TextBuffer\nbuf = TextBuffer(\"one\\ntwo\")\ntry:\n    buf.replace_line(99, \"x\")\n    raise AssertionError(\"expected IndexError\")\nexcept IndexError as exc:\n    assert \"index 99 out of range\" in str(exc), exc\nbuf.replace_line(0, \"ONE\")\nassert buf.text() == \"ONE\\ntwo\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-12",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, old_slugify mangles accented characters ('Caf\u00e9 Test' becomes 'caf-test'). Make it delegate to slugify so unicode text normalizes identically.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib import large\nassert large.old_slugify(\"Caf\u00e9 Test\") == \"cafe-test\"\nassert large.old_slugify(\"Hello World\") == \"hello-world\"\nassert large.old_slugify(\"a__b\") == \"a-b\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-13",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, strip_markup_prefix removes only one leading occurrence of the prefix. Make it strip ALL leading occurrences so strip_markup_prefix('---x', '-') == 'x'.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import strip_markup_prefix\nassert strip_markup_prefix(\"---x\", \"-\") == \"x\"\nassert strip_markup_prefix(\"-x\", \"-\") == \"x\"\nassert strip_markup_prefix(\"x\", \"-\") == \"x\"\nassert strip_markup_prefix(\"a-b\", \"-\") == \"a-b\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-14",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, the RenderOutput.join method keeps parts that consist only of the separator, producing runs like 'a---b'. Make join skip parts equal to the separator itself.",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import RenderOutput\nout = RenderOutput()\nassert out.join([\"a\", \"-\", \"b\"]) == \"a-b\"\nassert out.join([\"a\", \"\", \"b\"]) == \"a-b\"\nassert out.join([\"a\", \"b\"]) == \"a-b\"\nassert out.build(\"hello world\") == \"hello-world\"\nok = True\n"
+  },
+  {
+    "id": "biglib-large-15",
+    "klass": "large_file_navigation",
+    "repo": "biglib",
+    "instruction": "In src/biglib/large.py, truncate_with_ellipsis cuts mid-word. When the truncation point lands inside a word, cut back to the end of the last complete word before appending the ellipsis (a single long first word is still hard-truncated).",
+    "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom biglib.large import truncate_with_ellipsis\nassert truncate_with_ellipsis(\"hello world foo\", 9) == \"hello...\"\nassert truncate_with_ellipsis(\"abcdef\", 5) == \"ab...\"\nassert truncate_with_ellipsis(\"abc\", 5) == \"abc\"\nassert truncate_with_ellipsis(\"one two\", 3) == \"...\"\nok = True\n"
+  }
+]

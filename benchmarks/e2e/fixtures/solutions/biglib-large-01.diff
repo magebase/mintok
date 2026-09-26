@@ -1,0 +1,16 @@
+--- pristine/src/biglib/large.py
++++ solved/src/biglib/large.py
+@@ -28,11 +28,9 @@
+     collapsed = " ".join(text.split())
+     return collapsed.lower()
+ def format_ingest_label(text: str) -> str:
+-    """Render ingest text as a display label with a capitalized first word."""
++    """Render ingest text as a display label with every word capitalized."""
+     normalized = normalize_ingest(text)
+-    if not normalized:
+-        return ""
+-    return normalized[0].upper() + normalized[1:]
++    return " ".join(word[:1].upper() + word[1:] for word in normalized.split())
+ def count_ingest_tokens(text: str) -> int:
+     """Count whitespace-separated tokens in ingest text."""
+     return len(text.split())

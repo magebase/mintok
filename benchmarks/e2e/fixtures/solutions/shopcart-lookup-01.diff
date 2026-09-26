@@ -1,0 +1,28 @@
+--- pristine/src/shopcart/currency.py
++++ solved/src/shopcart/currency.py
+@@ -9,8 +9,13 @@
+ 
+ 
+ def parse_money(text: str) -> int:
+-    """Parse a dollar amount such as "$12.34" or "12.34" into integer cents."""
+-    cleaned = text.strip().lstrip("$").replace(",", "")
++    """Parse a dollar amount such as "$12.34", "-$2.50" or "12.34" into
++    integer cents (negative amounts allowed)."""
++    cleaned = text.strip().replace(",", "")
++    negative = cleaned.startswith("-")
++    if negative:
++        cleaned = cleaned[1:]
++    cleaned = cleaned.lstrip("$")
+     if not cleaned:
+         raise ValueError("empty money string")
+     dollars, _, fraction = cleaned.partition(".")
+@@ -19,7 +24,8 @@
+     if len(fraction) > 2:
+         raise ValueError("more than two decimal places")
+     fraction = (fraction or "0").ljust(2, "0")
+-    return int(dollars) * 100 + int(fraction)
++    cents = int(dollars) * 100 + int(fraction)
++    return -cents if negative else cents
+ 
+ 
+ def round_half_up(amount: float) -> int:

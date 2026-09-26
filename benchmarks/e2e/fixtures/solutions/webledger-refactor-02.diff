@@ -1,0 +1,12 @@
+--- pristine/src/webledger/accounts.py
++++ solved/src/webledger/accounts.py
+@@ -14,9 +14,6 @@
+     EQUITY = "equity"
+     INCOME = "income"
+     EXPENSE = "expense"
+-
+-
+-DEBIT_NORMAL = {AccountType.ASSET, AccountType.EXPENSE}
+ 
+ 
+ @dataclass

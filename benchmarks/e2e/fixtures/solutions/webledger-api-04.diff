@@ -1,0 +1,20 @@
+--- pristine/src/webledger/accounts.py
++++ solved/src/webledger/accounts.py
+@@ -55,11 +55,12 @@
+     def has(self, number: str) -> bool:
+         return number in self._accounts
+ 
+-    def by_type(self, account_type: AccountType) -> list[Account]:
+-        return sorted(
+-            (a for a in self._accounts.values() if a.type is account_type),
+-            key=lambda a: a.number,
+-        )
++    def by_type(self, account_type: AccountType, name_contains: str | None = None) -> list[Account]:
++        accounts = (a for a in self._accounts.values() if a.type is account_type)
++        if name_contains is not None:
++            needle = name_contains.lower()
++            accounts = (a for a in accounts if needle in a.name.lower())
++        return sorted(accounts, key=lambda a: a.number)
+ 
+     def default_chart(self) -> "ChartOfAccounts":
+         """Populate the standard synthetic demo chart."""

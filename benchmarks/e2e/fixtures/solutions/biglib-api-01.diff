@@ -1,0 +1,17 @@
+--- pristine/src/biglib/large.py
++++ solved/src/biglib/large.py
+@@ -1218,11 +1218,11 @@
+ # Public face of the module (the parts other modules actually use)
+ # ---------------------------------------------------------------------------
+ 
+-def slugify(text: str) -> str:
+-    """Canonical slug: lowercase ascii words joined by single dashes."""
++def slugify(text: str, separator: str = "-") -> str:
++    """Canonical slug: lowercase ascii words joined by ``separator``."""
+     text = unicodedata.normalize("NFKD", text)
+     words = [w.lower() for w in WORD_RE.findall(text)]
+-    return "-".join(words)
++    return separator.join(words)
+ 
+ 
+ def snake_case(text: str) -> str:

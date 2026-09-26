@@ -1,0 +1,11 @@
+--- pristine/src/webledger/validation.py
++++ solved/src/webledger/validation.py
+@@ -31,3 +31,8 @@
+     parts = date.split("-")
+     if len(parts) != 3 or len(parts[0]) != 4 or not all(p.isdigit() for p in parts):
+         raise ValidationError(f"date must be ISO yyyy-mm-dd: {date!r}")
++    month, day = int(parts[1]), int(parts[2])
++    if not 1 <= month <= 12:
++        raise ValidationError(f"month out of range: {date!r}")
++    if not 1 <= day <= 31:
++        raise ValidationError(f"day out of range: {date!r}")
