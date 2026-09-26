@@ -6,7 +6,9 @@ task copies, with every tool call flowing through agent_cli.py so tool-side
 context exposure is measured exactly from the trajectory logs.
 
 Subcommands:
-  prepare --dest DIR                 export the current commit into DIR (clean tree)
+  prepare --dest DIR [--task ID]     export the task's repo into DIR (clean tree;
+                                     mintok tasks use the git archive, fixture
+                                     tasks copy benchmarks/e2e/fixtures/<repo>)
   check --root COPY --task ID        run suite + task checker; write score JSON next to log
   record --arm ARM --task ID         fold one trajectory log + score into runs/<arm>.jsonl
   report                             aggregate runs/ into the proxy efficiency report
@@ -18,6 +20,7 @@ import argparse
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -33,22 +36,36 @@ from tasks import TASKS  # noqa: E402
 
 VENV_PY = HARNESS_ROOT / ".venv" / "bin" / "python"
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
+FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+GENERATED_TASKS = Path(__file__).resolve().parent / "tasks_generated.json"
 PROMPT_OVERHEAD_TOKENS = 250  # arm rules + JSON report instructions, identical for both arms
 
 
+def all_tasks() -> list[dict]:
+    """The 30 dev-set tasks plus the generated stratified eval tasks."""
+    tasks = list(TASKS)
+    if GENERATED_TASKS.exists():
+        tasks += json.loads(GENERATED_TASKS.read_text())
+    return tasks
+
+
 def task_by_id(task_id: str) -> dict:
-    for task in TASKS:
+    for task in all_tasks():
         if task["id"] == task_id:
             return task
     raise SystemExit(f"unknown task {task_id}")
 
 
-def prepare(dest: Path) -> None:
+def prepare(dest: Path, task_id: str | None = None) -> None:
     if dest.exists():
         subprocess.run(["rm", "-rf", str(dest)], check=True)
     dest.mkdir(parents=True)
-    archive = subprocess.run(["git", "archive", "HEAD"], cwd=HARNESS_ROOT, capture_output=True, check=True)
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+    repo = task_by_id(task_id).get("repo", "mintok") if task_id else "mintok"
+    if repo == "mintok":
+        archive = subprocess.run(["git", "archive", "HEAD"], cwd=HARNESS_ROOT, capture_output=True, check=True)
+        subprocess.run(["tar", "-x", "-C", str(dest)], input=archive.stdout, check=True)
+    else:
+        shutil.copytree(FIXTURES_DIR / repo, dest, dirs_exist_ok=True)
     print(dest)
 
 
@@ -218,6 +235,7 @@ def main() -> None:
 
     prep = sub.add_parser("prepare")
     prep.add_argument("--dest", type=Path, required=True)
+    prep.add_argument("--task", help="task id; its repo field selects the source tree")
 
     chk = sub.add_parser("check")
     chk.add_argument("--root", type=Path, required=True)
@@ -233,7 +251,7 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.cmd == "prepare":
-        prepare(args.dest)
+        prepare(args.dest, args.task)
     elif args.cmd == "check":
         check(args.root, args.task, args.log)
     elif args.cmd == "record":
