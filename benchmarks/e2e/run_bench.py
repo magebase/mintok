@@ -17,6 +17,9 @@ Subcommands:
   fast8                              print the FAST-8 smoke suite (id and behavior class)
   replay --logs DIR [--out FILE]     recompute per-task metrics from raw trajectory logs
                                      with zero agent runs
+  oracle --arm A --arm B             offline oracle router over two arms' run records:
+                                     per-task cheaper-solver selection, upper bound on
+                                     routing headroom (zero agent runs)
 """
 
 from __future__ import annotations
@@ -332,6 +335,50 @@ def replay(logs_dir: Path, out: Path | None) -> None:
         print(text)
 
 
+def oracle(arms: list[str]) -> None:
+    """Offline oracle router: per-task best-arm selection upper bound."""
+    from mintok.metrics import oracle_router
+
+    assert len(arms) == 2, "exactly two arms"
+    records = []
+    for arm_file in arms:
+        path = RUNS_DIR / f"{arm_file}.jsonl"
+        records += [
+            RunRecord(
+                task_id=r["task_id"],
+                arm=r["arm"],
+                solved=r["solved"],
+                frontier_usd=r.get("frontier_usd", 0.0),
+                input_tokens=r.get("input_tokens", 0),
+                output_tokens=r.get("output_tokens", 0),
+                turns=r.get("turns", 0),
+            )
+            for r in (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+        ]
+    a, b = arms
+    rep = oracle_router(records, a, b)
+    uniform_a = rep.uniform(records, a)
+    uniform_b = rep.uniform(records, b)
+    base, other = (uniform_a, uniform_b) if uniform_a >= uniform_b else (uniform_b, uniform_a)
+
+    def pct_of(x: float, y: float) -> float:
+        return (1 - y / x) * 100 if x else 0.0
+
+    print(f"oracle routing over {rep.tasks} tasks ({a} vs {b}):")
+    print(f"  {'uniform':<10}{'solved':>8}{'tok/attempt':>13}{'vs best-arm':>13}")
+    print(f"  {a:<10}{sum(r.solved for r in records if r.arm == a):>8}{uniform_a:>13.0f}")
+    print(f"  {b:<10}{sum(r.solved for r in records if r.arm == b):>8}{uniform_b:>13.0f}")
+    print(f"  {'oracle':<10}{rep.solved:>8}{rep.tokens_per_attempt:>13.0f}")
+    print(f"\nheadroom vs cheaper uniform arm: {base / other:.2f}x uniform, "
+          f"{base / rep.tokens_per_attempt:.2f}x routed")
+    print(f"routed: {rep.tokens_per_solved:.0f} tok/solved, p95 {rep.p95}, max {rep.max_tokens}, "
+          f"{rep.solves_per_mtok:.1f} solves/Mtok")
+    chosen = {}
+    for arm in (a, b):
+        chosen[arm] = sum(1 for v in rep.routed_to.values() if v == arm)
+    print(f"routes: " + ", ".join(f"{arm}: {n}" for arm, n in chosen.items()))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="e2e")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -365,6 +412,9 @@ def main() -> None:
     rpl.add_argument("--logs", type=Path, required=True)
     rpl.add_argument("--out", type=Path, default=None)
 
+    orc = sub.add_parser("oracle")
+    orc.add_argument("--arm", action="append", required=True)
+
     args = parser.parse_args()
     if args.cmd == "prepare":
         prepare(args.dest, args.task)
@@ -380,6 +430,8 @@ def main() -> None:
         fast8()
     elif args.cmd == "replay":
         replay(args.logs, args.out)
+    elif args.cmd == "oracle":
+        oracle(args.arm)
     else:
         report()
 

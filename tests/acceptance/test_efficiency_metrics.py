@@ -9,6 +9,7 @@ from mintok.metrics import (
     accepted_per_dollar,
     efficiency_ratio,
     frontier_calls_per_success,
+    oracle_router,
     oracle_verdict,
     paired_bootstrap_ratio,
 )
@@ -96,3 +97,53 @@ def oracle_headroom(ctx: SimpleNamespace, headroom: float) -> None:
 @then(parsers.parse('the oracle verdict is "{verdict}"'))
 def verdict_is(ctx: SimpleNamespace, verdict: str) -> None:
     assert oracle_verdict(ctx.headroom) == verdict
+
+
+@given("these paired tool-context runs:")
+def tool_context_runs(ctx: SimpleNamespace, datatable: list[list[str]]) -> None:
+    ctx.routing_records = [
+        RunRecord(
+            task_id=row["task"],
+            arm=row["arm"],
+            solved=row["solved"] == "yes",
+            frontier_usd=0.0,
+            input_tokens=int(row["input_tokens"]),
+        )
+        for row in table_rows(datatable)
+    ]
+
+
+@when(parsers.parse('the oracle router picks per task between "{arm_a}" and "{arm_b}"'))
+def run_oracle_router(ctx: SimpleNamespace, arm_a: str, arm_b: str) -> None:
+    ctx.router_a = arm_a
+    ctx.report = oracle_router(ctx.routing_records, arm_a, arm_b)
+
+
+@then(parsers.parse("the routed arm solves {solved:d} of {tasks:d} tasks"))
+def routed_solves(ctx: SimpleNamespace, solved: int, tasks: int) -> None:
+    assert (ctx.report.solved, ctx.report.tasks) == (solved, tasks)
+
+
+@then(parsers.parse("the routed arm spends {value:d} tokens per attempt"))
+def routed_per_attempt(ctx: SimpleNamespace, value: int) -> None:
+    assert round(ctx.report.tokens_per_attempt) == value
+
+
+@then(parsers.parse("the routed arm spends {value:d} tokens per solved task"))
+def routed_per_solved(ctx: SimpleNamespace, value: int) -> None:
+    assert round(ctx.report.tokens_per_solved) == value
+
+
+@then(parsers.parse("the routed arm achieves {value:d} solves per Mtok"))
+def routed_per_mtok(ctx: SimpleNamespace, value: int) -> None:
+    assert round(ctx.report.solves_per_mtok) == value
+
+
+@then(parsers.parse("the routed worst case is {value:d} tokens"))
+def routed_max(ctx: SimpleNamespace, value: int) -> None:
+    assert ctx.report.max_tokens == value
+
+
+@then(parsers.parse('the router sends {count:d} tasks to "{arm}"'))
+def routed_count(ctx: SimpleNamespace, count: int, arm: str) -> None:
+    assert sum(1 for a in ctx.report.routed_to.values() if a == arm) == count

@@ -45,3 +45,22 @@ Feature: Efficiency metrics and experiment discipline
       | 1.5      | KILL        |
       | 2.4      | INVESTIGATE |
       | 6.0      | CONTINUE    |
+
+  Scenario: An oracle router reveals the headroom between two arms
+    Given these paired tool-context runs:
+      | task | arm     | solved | input_tokens |
+      | t1   | control | yes    | 2000         |
+      | t1   | C       | yes    | 1000         |
+      | t2   | control | yes    | 800          |
+      | t2   | C       | no     | 900          |
+      | t3   | control | no     | 5000         |
+      | t3   | C       | yes    | 1500         |
+      | t4   | control | no     | 600          |
+      | t4   | C       | no     | 700          |
+    When the oracle router picks per task between "control" and "C"
+    Then the routed arm solves 3 of 4 tasks
+    And the routed arm spends 975 tokens per attempt
+    And the routed arm spends 1300 tokens per solved task
+    And the routed arm achieves 769 solves per Mtok
+    And the routed worst case is 1500 tokens
+    And the router sends 2 tasks to "C"

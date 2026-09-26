@@ -412,3 +412,64 @@ funnel (`mintok.funnel`, wired into `run_bench.py`):
 7. **Offline replay.** `replay` recomputes turns/tokens/latency for every
    trajectory from raw shim logs with zero agent runs — metric changes
    never require rerunning arms.
+
+### Oracle routing headroom (offline, zero new runs)
+
+C should not be the optimizer; it should be one backend chosen by one. The
+`oracle` subcommand (`run_bench.py oracle --arm control-eval --arm C-eval`,
+backed by `mintok.metrics.oracle_router`) computes the upper bound a
+per-task arm selector would achieve over the 240 existing frozen
+trajectories: a task both arms solve goes to the cheaper solver, a task only
+one solves goes to the solver, and a both-fail task is charged the cheaper
+failed attempt (optimistic). No frontier calls were made.
+
+| selector | solved | tok/attempt | tok/solved | p95 | max | vs control uniform | vs C uniform |
+|---|---|---|---|---|---|---|---|
+| uniform control | 114 (95%) | 1,876 | 1,974 | 4,080 | 26,842 | 1.00x | 0.86x |
+| uniform C | 114 (95%) | 1,607 | 1,691 | 3,138 | 8,482 | 1.17x | 1.00x |
+| **stratum router** | **116 (97%)** | **1,350** | **1,397** | **3,049** | **4,961** | **1.39x** | **1.19x** |
+| oracle router | 117 (98%) | 1,163 | 1,193 | 2,741 | 4,135 | **1.61x** | **1.38x** |
+
+The **stratum router** is the realistic proxy: route by task class only
+(C for api-signature/lookup/feature/schema strata, control for
+cross-file/refactor/large-file), with no per-task outcome peeking. It beats
+both uniform arms on solve rate (116/120) while beating control by 28% on
+tokens. The gap between 1.39x and the oracle's 1.61x is the residual value
+of per-task (below-stratum) selection — smaller than the stratum-level gain
+itself.
+
+Two honesty notes. First, the solve-rate gains (+2 stratum router, +3
+oracle) sit on temperature-0 single-run flip variance (~9% of instances
+flip between identical runs); the robust signal is the token headroom and
+the tail (routed max 4,135 vs control's 26,842), not the two extra solves.
+Second, the both-fail convention matters: charging the *dearer* failed
+attempt on the 3 both-fail tasks instead of the cheaper lifts the oracle to
+1,366 tok/attempt (1.37x over control), because control's
+`biglib-api-02` failure is the 26,842-token runaway. The stratum router is
+immune to this choice — it charges real, pre-declared routes — so its
+**1.39x over control is the defensible headline**; treat the oracle as a
+1.37–1.61x band whose width is entirely the both-fail convention.
+
+**Routing verdict: pursue aggressively.** Even the convention-independent
+stratum router's 1.39x over control (1.19x over C-everywhere, with +2
+solves) comes from task-class selection alone, and a router only needs to
+know the stratum — which deterministic pre-flight features (implied
+signature/schema change in the instruction, target module size, reference
+fan-out) can approximate without a model in front of the frontier call.
+The strata disagree by 2.48x-vs-0.38x, so the classification margin is
+wide; the oracle's 1.61x is the ceiling if per-task selection proves
+learnable.
+
+### Next: the product is the router, not any single arm
+
+The architecture implied by the split: a cheap deterministic classifier
+picks among backends — semantic reads + attribution (C) for
+api/schema/lookup/feature work, plain shell tools for cross-file bugs and
+refactors, and a purpose-built **large-module slice backend**
+(deterministic symbol index → AST slice → exact `file:line` candidate
+regions → targeted excerpts, no narration, no summaries, no broad symbol
+packets) for giant modules where semantic reads lose 2.6x. Before running
+any live routed system, the oracle should be recomputed over
+control/C/slicer to check whether slicing actually recovers the
+`large_file_navigation` loss; the funnel (FAST-8 → sequential dev →
+frozen confirm) prices that experiment cheaply.

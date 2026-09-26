@@ -6,6 +6,7 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
+import math
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +114,84 @@ def oracle_verdict(headroom: float, kill_below: float = 2.0, continue_at: float 
     if headroom < continue_at:
         return "INVESTIGATE"
     return "CONTINUE"
+
+
+# ---------------------------------------------------------------------------
+# Oracle router: per-task best-arm selection as an offline upper bound
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingReport:
+    """What a perfect per-task arm selector would have achieved."""
+
+    tasks: int
+    solved: int
+    tokens_per_attempt: float
+    tokens_per_solved: float
+    solves_per_mtok: float
+    p50: int
+    p95: int
+    max_tokens: int
+    routed_to: dict[str, str]
+
+    def uniform(self, records: Iterable[RunRecord], arm: str) -> float:
+        """Tokens per attempted task if the whole workload ran on ``arm``."""
+        rows = [r for r in records if r.arm == arm]
+        total = sum(r.input_tokens for r in rows)
+        return total / len(rows) if rows else 0.0
+
+
+def oracle_router(runs: Iterable[RunRecord], arm_a: str, arm_b: str) -> RoutingReport:
+    """Pick, per task, the arm a perfect router would send the task to.
+
+    A task both arms solve goes to the cheaper solver; a task only one arm
+    solves goes to the solver; a task neither solves is charged the cheaper
+    failed attempt (the optimistic bound — a real router cannot know in
+    advance). Works on the latest record per (task, arm) so blind-append
+    record files stay usable.
+    """
+    latest: dict[tuple[str, str], RunRecord] = {}
+    for run in runs:
+        if run.arm in (arm_a, arm_b):
+            latest[(run.task_id, run.arm)] = run
+
+    task_ids = sorted({task for task, _ in latest})
+    routed: dict[str, RunRecord] = {}
+    for task_id in task_ids:
+        a = latest.get((task_id, arm_a))
+        b = latest.get((task_id, arm_b))
+        if a is None or b is None:
+            chosen = a or b
+        elif a.solved and b.solved:
+            chosen = a if a.input_tokens <= b.input_tokens else b
+        elif a.solved:
+            chosen = a
+        elif b.solved:
+            chosen = b
+        else:
+            chosen = a if a.input_tokens <= b.input_tokens else b
+        routed[task_id] = chosen
+
+    rows = list(routed.values())
+    solved = sum(r.solved for r in rows)
+    total = sum(r.input_tokens for r in rows)
+    tokens = sorted(r.input_tokens for r in rows)
+
+    def pct(p: float) -> int:
+        return tokens[min(len(tokens) - 1, math.ceil(p * len(tokens)) - 1)]
+
+    return RoutingReport(
+        tasks=len(rows),
+        solved=solved,
+        tokens_per_attempt=total / len(rows) if rows else 0.0,
+        tokens_per_solved=total / solved if solved else float("inf"),
+        solves_per_mtok=(solved / total * 1_000_000) if total else 0.0,
+        p50=tokens[len(tokens) // 2] if tokens else 0,
+        p95=pct(0.95) if tokens else 0,
+        max_tokens=max(tokens) if tokens else 0,
+        routed_to={task: run.arm for task, run in routed.items()},
+    )
 
 
 # Cost-accounting spec: $0.01 of blended cost per Optimization Compute Unit.
