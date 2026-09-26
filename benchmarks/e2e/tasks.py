@@ -189,6 +189,8 @@ ok = True
     },
     {
         "id": "new-pack-is-empty",
+        # Known semantic-reasoning trap: failed on every arm tested so far
+        # (control, D, E, F, G, H, I, J, K). Retained deliberately; see RESULTS.md.
         "klass": "new_symbol",
         "instruction": (
             "Add an `is_empty` property to `RelearnPack` in src/mintok/pack.py: "

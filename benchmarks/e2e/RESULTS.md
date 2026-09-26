@@ -294,3 +294,25 @@ mechanism.
    on re-visit-heavy strata (api propagation, schema change) as hypothesized.
 
 Default remains **C**.
+
+## C is frozen (decision)
+
+After V3 (H/I/J regress) and the K follow-up (transparent query-attached
+continuity: 29/30, 8.3 turns, 2,742 tok/att — regression vs C), the
+frontier-facing interface is **frozen at C**: compact semantic reads +
+attribution, with no further tool additions on the 30-task dev set.
+
+Key lesson from K: agents frequently bypass `query` for `read` + shell, so
+optimizations must work *underneath* whatever the agent naturally does
+(interception at the I/O layer), not require cooperation with a new API.
+Any future continuity work belongs there and must be validated out of
+sample, not on these 30 tasks.
+
+`new-pack-is-empty` is retained as a marked **known semantic-reasoning
+trap** (ten consecutive failures across all arms). The report now includes
+tail-cost statistics (median/p90/p95/max per arm) so pathological
+trajectories stay visible instead of hiding inside averages.
+
+Next: frozen out-of-sample run — control (primary baseline) vs C (primary
+experiment) vs K (secondary, exploratory) on the 120 generated eval tasks,
+reported per stratum.

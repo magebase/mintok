@@ -190,6 +190,43 @@ def report() -> None:
             f"{(solved / out_tok * 1_000_000) if out_tok else 0.0:>8.2f}"
         )
 
+    print("\ntail cost per arm (tool-context tokens per attempted task):")
+    print(f"{'arm':<10}{'median':>8}{'p90':>8}{'p95':>8}{'max':>8}")
+    for arm, rows in sorted(arms.items()):
+        toks = sorted(r["input_tokens"] for r in rows)
+        if not toks:
+            continue
+
+        def pct(p: float) -> int:
+            return toks[min(len(toks) - 1, math.ceil(p * len(toks)) - 1)]
+
+        print(
+            f"{arm:<10}{toks[len(toks) // 2]:>8}"
+            f"{pct(0.90):>8}{pct(0.95):>8}{max(toks):>8}"
+        )
+
+    print("\nper-stratum solve rate and tokens (generated eval tasks only):")
+    klass_of = {t["id"]: t.get("klass", "mintok_dev") for t in all_tasks()}
+    strata: dict[str, dict[str, list[dict]]] = {}
+    for arm, rows in arms.items():
+        for r in rows:
+            k = klass_of.get(r["task_id"])
+            if k is None:
+                continue  # dev-set tasks have no stratum
+            strata.setdefault(k, {}).setdefault(arm, []).append(r)
+    if strata:
+        skel = f"{'stratum':<30}{'arm':<10}{'n':>4}{'solved':>8}{'tok/solv':>10}"
+        print(skel)
+        print("-" * len(skel))
+        for k in sorted(strata):
+            for arm, rows in sorted(strata[k].items()):
+                solved = sum(r["solved"] for r in rows)
+                tok = sum(r["input_tokens"] for r in rows)
+                print(
+                    f"{k:<30}{arm:<10}{len(rows):>4}{solved:>8}"
+                    f"{(tok / solved) if solved else float('inf'):>10.0f}"
+                )
+
     print("\npaired ratios on jointly solved tasks (control tokens / other-arm tokens):")
     by_task: dict[str, dict[str, dict]] = {}
     for arm, rows in arms.items():
