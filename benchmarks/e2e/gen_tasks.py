@@ -363,10 +363,11 @@ TASKS: list[dict] = [
             )
             breakdown = {"subtotal": 2820, "discount": 282, "shipping": 500, "tax": 209, "total": 3247}
             text = render_receipt(order, breakdown=breakdown)
-            assert "Subtotal $28.20" in text, text
-            assert "Discount $2.82" in text, text
-            assert "Shipping $5.00" in text, text
-            assert "Tax $2.09" in text, text
+            import re
+            assert re.search(r"Subtotal\s+\$28\.20", text), text
+            assert re.search(r"Discount\s+\$2\.82", text), text
+            assert re.search(r"Shipping\s+\$5\.00", text), text
+            assert re.search(r"Tax\s+\$2\.09", text), text
             assert "TOTAL" in text and "$32.47" in text, text
             assert "Subtotal" not in render_receipt(order)
             """
