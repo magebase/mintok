@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import urllib.request
 from collections.abc import Callable
 from typing import Any
@@ -82,7 +83,9 @@ def build_request(
     gen.update(generation or {})
     if provider == "openrouter":
         url = provider_base(provider, base_url) + "/chat/completions"
-        wire_messages = [_openrouter_message(m) for m in messages]
+        # Single flattening point: plural form splits user tool_result
+        # blocks into wire tool messages; never pre-flatten at call sites.
+        wire_messages = _openrouter_messages(messages)
         body: dict[str, Any] = {
             "model": model,
             "max_tokens": gen["max_output_tokens"],
@@ -93,7 +96,9 @@ def build_request(
             body["top_p"] = gen["top_p"]
         if tools:
             body["tools"] = [
-                {"type": "function", "function": tool} for tool in tools
+                # internal schema key is input_schema; OpenAI wire wants parameters
+                {"type": "function", "function": {"name": tool["name"], "description": tool.get("description", ""), "parameters": tool.get("input_schema") or tool.get("parameters", {})}}
+                for tool in tools
             ]
     else:
         url = provider_base(provider, base_url) + "/v1/messages"
@@ -120,17 +125,21 @@ def _openrouter_message(message: dict[str, Any]) -> dict[str, Any]:
     content = message.get("content")
     if isinstance(content, str):
         return {"role": message["role"], "content": content}
+    content = content or []  # None/empty content (e.g. tool-only turns)
     if message["role"] == "assistant":
         text = "".join(b.get("text", "") for b in content if b.get("type") == "text")
-        calls = [
-            {
-                "id": b["id"],
-                "type": "function",
-                "function": {"name": b["name"], "arguments": json.dumps(b.get("input", {}))},
-            }
-            for b in content
-            if b.get("type") == "tool_use"
-        ]
+        calls = []
+        use_idx = 0
+        for b in content:
+            if b.get("type") == "tool_use":
+                calls.append(
+                    {
+                        "id": b.get("id") or f"call_{use_idx}",
+                        "type": "function",
+                        "function": {"name": b["name"], "arguments": json.dumps(b.get("input", {}))},
+                    }
+                )
+                use_idx += 1
         out: dict[str, Any] = {"role": "assistant", "content": text or None, "tool_calls": calls}
         return out
     # tool_result blocks -> one OpenAI tool message per result
@@ -147,7 +156,7 @@ def _openrouter_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
                     wire.append(
                         {
                             "role": "tool",
-                            "tool_call_id": block["tool_use_id"],
+                            "tool_call_id": block.get("tool_use_id") or "unknown",
                             "content": block.get("content", ""),
                         }
                     )
@@ -158,8 +167,13 @@ def _openrouter_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
     return wire
 
 
-def parse_response(provider: str, payload: dict[str, Any], model_hint: str = "") -> tuple[str, list[dict[str, Any]], UsageRecord]:
-    """Normalize a provider reply to (stop_reason, blocks, UsageRecord)."""
+def parse_response(provider: str, payload: dict[str, Any], model_hint: str = "", requested_model: str = "") -> tuple[str, list[dict[str, Any]], UsageRecord, dict[str, Any]]:
+    """Normalize a provider reply to (stop, blocks, UsageRecord, request_meta).
+
+    ``request_meta`` ties each request to what actually served it — on
+    OpenRouter, the returned model slug, upstream provider, and generation
+    id — so a silent upstream routing change cannot hide inside a run.
+    """
     if provider == "openrouter":
         choice = payload["choices"][0]
         message = choice["message"]
@@ -167,17 +181,18 @@ def parse_response(provider: str, payload: dict[str, Any], model_hint: str = "")
         blocks: list[dict[str, Any]] = []
         if message.get("content"):
             blocks.append({"type": "text", "text": message["content"]})
-        for call in message.get("tool_calls", []) or []:
+        for idx, call in enumerate(message.get("tool_calls", []) or []):
+            # Some upstreams omit tool_call ids; synthesize stable ones —
+            # the same enumeration order is used when flattening back.
             blocks.append(
                 {
                     "type": "tool_use",
-                    "id": call["id"],
+                    "id": call.get("id") or f"call_{idx}",
                     "name": call["function"]["name"],
                     "input": json.loads(call["function"]["arguments"] or "{}"),
                 }
             )
         usage_raw = payload.get("usage", {})
-        cached = 0
         details = usage_raw.get("prompt_tokens_details") or {}
         cached = details.get("cached_tokens", 0)
         prompt = usage_raw.get("prompt_tokens", 0)
@@ -188,7 +203,13 @@ def parse_response(provider: str, payload: dict[str, Any], model_hint: str = "")
             output_tokens=usage_raw.get("completion_tokens", 0),
             reasoning_tokens=usage_raw.get("completion_tokens_details", {}).get("reasoning_tokens", 0),
         )
-        return stop, blocks, usage
+        meta = {
+            "requested_model": requested_model or model_hint,
+            "returned_model": payload.get("model", ""),
+            "upstream_provider": payload.get("provider", ""),
+            "request_id": payload.get("id", ""),
+        }
+        return stop, blocks, usage, meta
     usage = payload["usage"]
     usage_out = UsageRecord(
         model=payload["model"],
@@ -198,7 +219,9 @@ def parse_response(provider: str, payload: dict[str, Any], model_hint: str = "")
         output_tokens=usage["output_tokens"],
         reasoning_tokens=usage.get("reasoning_tokens", 0),
     )
-    return payload.get("stop_reason", ""), list(payload.get("content", [])), usage_out
+    meta = {"requested_model": requested_model or model_hint, "returned_model": payload.get("model", ""),
+            "upstream_provider": "anthropic", "request_id": payload.get("id", "")}
+    return payload.get("stop_reason", ""), list(payload.get("content", [])), usage_out, meta
 
 
 def run_turn(
@@ -211,8 +234,8 @@ def run_turn(
     tools: list[dict[str, Any]] | None = None,
     base_url: str | None = None,
     generation: dict[str, Any] | None = None,
-) -> tuple[str, list[dict[str, Any]], UsageRecord]:
-    """One agent turn: returns (stop_reason, content blocks, UsageRecord)."""
+) -> tuple[str, list[dict[str, Any]], UsageRecord, dict[str, Any]]:
+    """One agent turn: (stop_reason, content blocks, UsageRecord, request_meta)."""
     api_key = os.environ.get(provider_key_env(provider))
     if not api_key:
         raise RuntimeError(f"{provider_key_env(provider)} not set")
@@ -222,13 +245,29 @@ def run_turn(
         provider, model, system, messages, api_key, base_url, tools, generation
     )
     payload = transport(url, headers, body)
-    return parse_response(provider, payload, model_hint=model)
+    return parse_response(provider, payload, model_hint=model, requested_model=model)
 
 
 def _urllib_transport(url: str, headers: dict[str, str], body: bytes) -> dict[str, Any]:
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request) as reply:
-        return json.loads(reply.read().decode("utf-8"))
+    try:
+        # Long timeout: free-tier models can reason for minutes, but a
+        # stalled connection must not hang the whole benchmark forever.
+        with urllib.request.urlopen(request, timeout=600) as reply:
+            payload = json.loads(reply.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:  # surface the provider's reason
+        detail = err.read().decode("utf-8", "replace")[:2000]
+        raise RuntimeError(f"HTTP {err.code} from provider: {detail}") from err
+    except (TimeoutError, socket.timeout, urllib.error.URLError) as err:
+        raise RuntimeError(f"request timed out or connection failed: {err}") from err
+    # OpenRouter signals upstream failures inside HTTP 200: {"error": {...}}
+    if payload.get("error"):
+        err = payload["error"]
+        raise RuntimeError(
+            f"provider error {err.get('code')}: {err.get('message')}"
+            f" ({(err.get('metadata') or {}).get('error_type', 'unknown')})"
+        )
+    return payload
 
 
 def run_completion(
@@ -241,5 +280,5 @@ def run_completion(
     tools: list[dict[str, Any]] | None = None,
 ) -> tuple[str, UsageRecord]:
     """Text-only completion helper (no tool plumbing)."""
-    stop, blocks, usage = run_turn(provider, model, system, messages, transport=transport, tools=tools)
+    stop, blocks, usage, _meta = run_turn(provider, model, system, messages, transport=transport, tools=tools)
     return "".join(b.get("text", "") for b in blocks if b.get("type") == "text"), usage

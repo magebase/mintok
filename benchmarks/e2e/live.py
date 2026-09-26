@@ -135,28 +135,40 @@ TOOL_SCHEMAS = {
 
 
 def execute_tool(root: Path, log: Path, policy: str, name: str, args: dict) -> tuple[str, int]:
-    """One tool call through the logging shim; returns (output, exit_code)."""
-    if name == "shell":
-        cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "shell", args["command"]]
-        stdin = None
-    elif name == "slice":
-        cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "slice", args["description"]]
-        stdin = None
-    elif name == "read":
-        cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "read", args["path"]]
-        if args.get("start") is not None:
-            cmd += [str(args["start"])]
-            if args.get("end") is not None:
-                cmd += [str(args["end"])]
-        stdin = None
-    elif name == "patch":
-        cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "patch", "--file", args["file"], "--start", str(args["start"]), "--end", str(args["end"]), "--stdin"]
-        stdin = args["source"]
-    elif name == "suite":
-        cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "suite", "--quiet"]
-        stdin = None
-    else:
-        return f"error: unknown tool {name}", 1
+    """One tool call through the logging shim; returns (output, exit_code).
+
+    A malformed tool call is a recoverable model error, never a harness
+    crash: bad/missing arguments come back as an error tool result that
+    names the expected schema, and the model retries.
+    """
+    try:
+        if name == "shell":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "shell", args["command"]]
+            stdin = None
+        elif name == "slice":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "slice", args["description"]]
+            stdin = None
+        elif name == "read":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "read", args["path"]]
+            if args.get("start") is not None:
+                cmd += [str(args["start"])]
+                if args.get("end") is not None:
+                    cmd += [str(args["end"])]
+            stdin = None
+        elif name == "patch":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "patch", "--file", args["file"], "--start", str(args["start"]), "--end", str(args["end"]), "--stdin"]
+            stdin = args["source"]
+        elif name == "suite":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "suite", "--quiet"]
+            stdin = None
+        else:
+            return f"error: unknown tool {name}", 1
+    except (KeyError, TypeError) as err:
+        expected = next((t["input_schema"] for t in TOOL_SCHEMAS[policy] if t["name"] == name), {})
+        return (
+            f"error: malformed {name} arguments ({err}); expected schema: {json.dumps(expected)}",
+            1,
+        )
     proc = subprocess.run(cmd, input=stdin, capture_output=True, text=True, timeout=700)
     return (proc.stdout + proc.stderr).rstrip(), proc.returncode
 
@@ -197,27 +209,37 @@ def run_loop(
     completed = False
     usage_total = _empty_usage()
     per_turn: list[dict] = []
+    request_metas: list[dict] = []
     for _ in range(max_turns):
         started = time.monotonic()
         if completion is not None:
-            stop, blocks, usage = completion(model, system, messages, tools=tools)
+            stop, blocks, usage = completion(model, system, messages, tools=tools)[:3]
+            meta = {}
         else:
             from model_runner import build_request, _urllib_transport
 
             api_key = os.environ[provider_key_env(provider)]
-            if provider == "openrouter":
-                from model_runner import _openrouter_messages
-
-                wire = _openrouter_messages(messages)
-            else:
-                wire = messages
+            # build_request flattens internal blocks to the provider wire
+            # exactly once; pre-flattening here would strip tool_call_id.
             url, headers, body = build_request(
-                provider, model, system, wire, api_key, tools=tools, generation=generation
+                provider, model, system, messages, api_key, tools=tools, generation=generation
             )
-            payload = _urllib_transport(url, headers, body)
-            stop, blocks, usage = parse_response(provider, payload, model_hint=model)
+            payload = None
+            for attempt in range(8):  # free-tier upstreams overload for minutes
+                try:
+                    payload = _urllib_transport(url, headers, body)
+                    break
+                except RuntimeError as err:
+                    if attempt == 7:
+                        raise
+                    wait = min(15.0 * (3 ** attempt), 300.0)
+                    print(f"  [retry {attempt + 1}/7 after {wait:.0f}s: {err}]")
+                    time.sleep(wait)
+            stop, blocks, usage, meta = parse_response(provider, payload, model_hint=model, requested_model=model)
         usage_total["latency_s"] += time.monotonic() - started
         _add_usage(usage_total, usage)
+        if meta:
+            request_metas.append(meta)
         if usage is not None:
             try:
                 breakdown = prices.cost(model, usage)
@@ -248,6 +270,12 @@ def run_loop(
     usage_total["provider"] = provider
     usage_total["price_table"] = price_note
     usage_total["usd"] = round(sum(row["cost_total_usd"] for row in per_turn), 6)
+    if meta:
+        # What actually served the requests: requested vs returned model,
+        # upstream provider, request ids. OpenRouter can re-route silently.
+        for row, m in zip(per_turn, request_metas):
+            row.update(m)
+        usage_total["requests"] = request_metas
     if completion is None:  # real runs only; fake completions bill nothing
         log.parent.mkdir(parents=True, exist_ok=True)
         (log.parent / f"{log.stem}.usage.json").write_text(json.dumps(usage_total, indent=2))

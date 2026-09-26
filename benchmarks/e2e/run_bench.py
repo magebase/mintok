@@ -600,6 +600,18 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
     scratch = Path("/home/aqua/bench-run")
     scratch.mkdir(parents=True, exist_ok=True)
 
+    # Resume from durable records: a free-tier quota (e.g. 50 requests/day)
+    # can interrupt a 30-trajectory run; never change arms mid-experiment —
+    # skip tasks already recorded and continue from here, days later.
+    def recorded_tasks(arm: str) -> set[str]:
+        path = RUNS_DIR / f"{arm}.jsonl"
+        if not path.exists():
+            return set()
+        return {json.loads(l)["task_id"] for l in path.read_text().splitlines() if l.strip()}
+
+    done_slicer = recorded_tasks("slicer-large")
+    done_control = recorded_tasks("control-large")
+
     frozen_path = RUNS_DIR / "control-eval.manifest.json"
     frozen = RunManifest.from_json(frozen_path.read_text()) if frozen_path.exists() else None
     live_manifest = arm_manifest("S")
@@ -619,14 +631,17 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
     for task in tasks:
         task_id = task["id"]
         copy = scratch / "copies" / f"{task_id}-slicer"
-        prepare(copy, task_id)
         log = scratch / "logs" / f"{task_id}-slicer.jsonl"
-        log.unlink(missing_ok=True)
-        run_loop(
-            copy, log, "S", task["instruction"], model,
-            completion=fake_completion if mock else None,
-            provider=provider,
-        )
+        if task_id in done_slicer:
+            print(f"resume: {task_id} slicer already recorded; using durable record")
+        else:
+            prepare(copy, task_id)
+            log.unlink(missing_ok=True)
+            run_loop(
+                copy, log, "S", task["instruction"], model,
+                completion=fake_completion if mock else None,
+                provider=provider,
+            )
         check(copy, task_id, log)
 
         entries = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
@@ -671,7 +686,8 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
             )
         )
         if not mock:
-            record("slicer-large", task_id, log)
+            if task_id not in done_slicer:
+                record("slicer-large", task_id, log)
         usage_path = log.parent / f"{log.stem}.usage.json"
         usd = json.loads(usage_path.read_text())["usd"] if usage_path.exists() else 0.0
         note = f" failure={klass}" if not score["solved"] else ""
@@ -679,20 +695,25 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
               f"slice={slice_tok} fallback={fallback_tok} usd={usd:.4f}{note}")
 
         if control_arm == "control-large":
-            ccopy = scratch / "copies" / f"{task_id}-control"
-            prepare(ccopy, task_id)
-            clog = scratch / "logs" / f"{task_id}-control-large.jsonl"
-            clog.unlink(missing_ok=True)
-            run_loop(
-                ccopy, clog, "control", task["instruction"], model,
-                completion=fake_completion if mock else None,
-                provider=provider,
+            if task_id in done_control:
+                print(f"resume: {task_id} control already recorded; using durable record")
+            else:
+                ccopy = scratch / "copies" / f"{task_id}-control"
+                prepare(ccopy, task_id)
+                clog = scratch / "logs" / f"{task_id}-control-large.jsonl"
+                clog.unlink(missing_ok=True)
+                run_loop(
+                    ccopy, clog, "control", task["instruction"], model,
+                    completion=fake_completion if mock else None,
+                    provider=provider,
+                )
+                check(ccopy, task_id, clog)
+                if not mock:
+                    record(control_arm, task_id, clog)
+            cscore = json.loads(
+                (scratch / "logs" / f"{task_id}-control-large.score.json").read_text()
             )
-            check(ccopy, task_id, clog)
-            if not mock:
-                record(control_arm, task_id, clog)
-            cscore = json.loads((clog.parent / f"{clog.stem}.score.json").read_text())
-            cusage_path = clog.parent / f"{clog.stem}.usage.json"
+            cusage_path = scratch / "logs" / f"{task_id}-control-large.usage.json"
             control_rows[task_id] = {
                 "solved": cscore["solved"],
                 "input_tokens": cscore["tool_output_tokens"] + prompt_tokens,
@@ -769,6 +790,23 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
         (slicer_solved_tok / rep.solved) if rep.solved else None,
         "{:.0f}",
     )
+
+    def provider_tokens(u: dict) -> int:
+        return sum(u.get(k, 0) for k in ("input_tokens", "cached_input_tokens", "cache_write_tokens", "output_tokens", "reasoning_tokens"))
+
+    slicer_ptok_solved = sum(
+        provider_tokens(u) for u, r in zip(slicer_usage, runs) if r.solved
+    )
+    control_ptok_solved = sum(
+        provider_tokens(u) for u, r in zip(control_usage, runs) if control_rows[r.task_id]["solved"]
+    )
+    row("provider tok/solved",
+        (control_ptok_solved / ctrl_solved) if ctrl_solved and control_usage else None,
+        (slicer_ptok_solved / rep.solved) if rep.solved else None,
+        "{:.0f}")
+    if not mock and slicer_usd_total == 0.0:
+        print("  (free-model run: $/solved is uninformative at $0; headline is "
+              "provider tokens/solved and tool-context/solved)")
     print(f"  {'slice acceptance':<22}{'-':>16}{rep.acceptance_rate:>16.2f}")
     print(f"  {'raw fallback rate':<22}{'-':>16}{rep.fallback_rate:>16.2f}")
     print(f"  {'expanded slices':<22}{'-':>16}{rep.expanded_rate:>16.2f}")
@@ -826,7 +864,8 @@ def main() -> None:
     slc.add_argument("--eval", action="store_true")
 
     prm = sub.add_parser("promote-large")
-    prm.add_argument("--model", default="claude-sonnet-4-5")
+    prm.add_argument("--model", required=True, help="exact model snapshot id; never a random router slug")
+    prm.add_argument("--provider", default="anthropic", choices=["anthropic", "openrouter"])
     prm.add_argument("--mock", action="store_true", help="scripted fake model; plumbing only")
 
     args = parser.parse_args()
@@ -851,7 +890,12 @@ def main() -> None:
     elif args.cmd == "slice":
         slice_cmd(args.task, args.eval)
     elif args.cmd == "promote-large":
-        promote_large(args.model, mock=args.mock)
+        if args.model.lower() in ("openrouter/free", "openrouter/auto", "free", "auto"):
+            raise SystemExit(
+                "refusing to run: --model must be one specific model slug, never a "
+                "random router slug — same-model control requires a fixed upstream"
+            )
+        promote_large(args.model, mock=args.mock, provider=args.provider)
     else:
         report()
 
