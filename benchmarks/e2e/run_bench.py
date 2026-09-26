@@ -739,7 +739,9 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
         return rows
 
     slicer_usage = usage_rows("slicer")
-    control_usage = usage_rows("control") if control_arm == "control-large" else []
+    # control-large logs are stemmed f"{tid}-control-large"; a bare
+    # "control" suffix found nothing and every control row rendered "—".
+    control_usage = usage_rows("control-large") if control_arm == "control-large" else []
 
     def tok_sum(rows: list[dict], key: str) -> int:
         return sum(u.get(key, 0) for u in rows)
@@ -799,6 +801,19 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
         (control_ptok_solved / ctrl_solved) if ctrl_solved and control_usage else None,
         (slicer_ptok_solved / rep.solved) if rep.solved else None,
         "{:.0f}")
+    # Tail gate on tokens: the free-model runs price at $0, so p95/max
+    # regressions must be visible in token space, not just dollar space.
+    control_ptok_task = [provider_tokens(u) for u in control_usage] or None
+    slicer_ptok_task = [provider_tokens(u) for u in slicer_usage] or None
+    if slicer_ptok_task and any(slicer_ptok_task):
+        s_sorted = sorted(slicer_ptok_task)
+        n9 = max(1, math.ceil(0.95 * len(s_sorted))) - 1
+        c_sorted = sorted(control_ptok_task) if control_ptok_task else []
+        c_n9 = max(1, math.ceil(0.95 * len(c_sorted))) - 1 if c_sorted else 0
+        row("p95 provider tok/task",
+            c_sorted[c_n9] if c_sorted else None, s_sorted[n9], "{:d}")
+        row("max provider tok/task",
+            max(c_sorted) if c_sorted else None, max(s_sorted), "{:d}")
     if not mock and slicer_usd_total == 0.0:
         print("  (free-model run: $/solved is uninformative at $0; headline is "
               "provider tokens/solved and tool-context/solved)")

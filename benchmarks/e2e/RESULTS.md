@@ -714,13 +714,44 @@ on the solve bar) is permanently recorded above and must not be
 overwritten or reinterpreted; its records are archived at
 `/home/aqua/bench-run/stage1a/`.
 
-**Stage-1B gates** (both must hold to justify building a fresh holdout):
-solve 15/15, and provider tokens/solved retains ≥ ~3x reduction vs the
-same-model control. Stage-1B passing does not promote; it only qualifies
-the apparatus for the fresh-holdout gate (slicer ≥ control solve rate,
-≥2x provider-token reduction required / ≥3x strong, no catastrophic
-p95/max tails, healthy slice acceptance). Paid Stage-2 frontier
-calibration happens only after the fresh holdout passes.
+### Fresh large-module holdout (pre-registered before generation)
+
+Motivated by observed run-to-run variance (control itself moved 15/15 →
+14/15 with no change), the next protocol measures **non-inferiority**
+instead of perfection. Stage-1A/B verdicts stand as recorded (REJECT);
+nothing is reinterpreted.
+
+**Protocol**: fix the report bugs, freeze the slicer implementation
+(verify-then-stop + member-method slicing; no structural-edit-safety
+check yet — measure its failure class out-of-sample first), generate
+30–50 completely fresh large-module tasks across several repos, freeze
+prompts/checkers/repo snapshots via fingerprints BEFORE inspecting any
+outcome, then run same-model control + slicer.
+
+**Metric definitions (pinned — the report fix surfaced these)**:
+
+- *tool-context+prompt per solved*: fresh (uncached) context the harness
+  feeds the model, summed over solved tasks / solved count. Stage-1B:
+  1,830 vs 9,116 = **5.0x**.
+- *provider tokens per solved*: input + cache reads + cache writes +
+  output + reasoning, summed over ALL tasks / solved count. Stage-1B:
+  53,003 vs 76,808 = **1.45x** — cache-read accumulation across turns
+  narrows the raw number; report it, never hide it behind the median.
+- *median per-solved-task provider tokens* (diagnostic): Stage-1B 3.3x.
+  The earlier "3.3x provider tokens" claim was this statistic; the gate
+  below is NOT scored on it.
+
+**Gates** (on the pinned definitions):
+
+- PRIMARY EFFICIENCY: provider tokens/solved ≥ 2.0x required, ≥ 3.0x
+  strong, ≥ 4.0x excellent.
+- CORRECTNESS: slicer solve rate no more than 5 percentage points below
+  control (≈2 tasks at 40); exact solve counts reported separately.
+- TAIL: p95/max provider tok/task no catastrophic regression vs control.
+- DIAGNOSTICS: slice acceptance, raw fallback, turns/solved, failure
+  classes.
+
+Paid Stage-2 frontier calibration only after this holdout passes.
 
 ### Stage-1B outcome (same 15 tasks, same free model, fixes applied)
 
