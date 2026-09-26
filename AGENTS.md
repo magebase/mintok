@@ -150,7 +150,17 @@ tests/acceptance/     pytest-bdd step definitions
 - Never rewrite shared history; never force-push `main`.
 - Keep commits reviewable and revertible.
 
-## 10. Security and privacy policy (all contributors and agents)
+## 10. Agent workflow rules
+
+- **No sleep-blocking.** Never issue `sleep N` to wait on background
+  runs, servers, or model calls. Check status, do other useful work
+  (analysis, docs, tests, code review), and re-check later. Long-running
+  benchmarks run unattended-safe: durable records + resume.
+- **Always be working.** While a benchmark or build runs, use the time:
+  analyze partial results, review diffs, tighten tests, update docs.
+  Return to the blocker only when there is new information.
+
+## 11. Security and privacy policy (all contributors and agents)
 
 - **Never commit secrets**: API keys, tokens, passwords, `.env*` files, connection
   strings, or credentials of any kind. `.gitignore` blocks `.env*`; do not force-add.
