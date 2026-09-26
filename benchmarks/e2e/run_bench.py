@@ -523,18 +523,34 @@ def slice_cmd(task_id: str | None, eval_all: bool) -> None:
           "<=600 strong, <=400 excellent at control's solve rate")
 
 
-def promote_large(model: str) -> None:
+def promote_large(model: str, mock: bool = False) -> None:
     """Isolated live test: slicer arm vs the frozen control-eval trajectories.
 
     Clean causal comparison on the same 15 large-module tasks: the control
     arm's trajectories already exist from the frozen eval, so only the
-    slicer arm runs live. Verdict against the pre-registered bar.
+    slicer arm runs live. Verdict against the pre-registered bar. With
+    --mock the frontier model is replaced by a scripted fake (slice, suite,
+    stop): plumbing validation only, nothing is recorded, the verdict is
+    not meaningful.
     """
-    import tempfile
-
     from mintok.funnel import SlicerRun, slicer_promotion
 
     from live import run_loop
+
+    def mock_completion(model: str, system: str, messages: list, tools: list | None = None):
+        """Scripted fake agent: slice, then suite, then stop."""
+        calls = sum(1 for m in messages if m.get("role") == "assistant")
+        blocks = [
+            {
+                "type": "tool_use",
+                "id": f"m{calls}",
+                "name": "slice" if calls == 0 else "suite",
+                "input": {"description": "the task targets"} if calls == 0 else {},
+            }
+        ]
+        if calls >= 2:
+            return "end_turn", [{"type": "text", "text": "mock complete"}], None
+        return "tool_use", blocks, None
 
     tasks = [t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"]
     scratch = Path("/home/aqua/bench-run")
@@ -545,10 +561,12 @@ def promote_large(model: str) -> None:
         copy = scratch / "copies" / f"{task_id}-slicer"
         prepare(copy, task_id)
         log = scratch / "logs" / f"{task_id}-slicer.jsonl"
-        summary = run_loop(copy, log, "S", task["instruction"], model)
-        task_root = Path(tempfile.mkdtemp())  # checker needs the edited copy
-        shutil.copytree(copy, task_root, dirs_exist_ok=True)
-        check(task_root, task_id, log)
+        log.unlink(missing_ok=True)
+        summary = run_loop(
+            copy, log, "S", task["instruction"], model,
+            completion=mock_completion if mock else None,
+        )
+        check(copy, task_id, log)
 
         entries = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
         slice_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "slice")
@@ -566,7 +584,8 @@ def promote_large(model: str) -> None:
                 expanded=any(e.get("expanded") for e in entries),
             )
         )
-        record("slicer-large", task_id, log)
+        if not mock:
+            record("slicer-large", task_id, log)
         print(f"{task_id}: solved={runs[-1].solved} tokens={runs[-1].tokens} turns={runs[-1].turns}")
 
     control = {
@@ -574,11 +593,11 @@ def promote_large(model: str) -> None:
         for l in (RUNS_DIR / "control-eval.jsonl").read_text().splitlines()
         if l.strip()
     }
-    report_rows = list(runs)
     rep = slicer_promotion(runs, solve_target=len(tasks))
     ctrl_solved = sum(control[r.task_id]["solved"] for r in runs)
-    ctrl_tok = sum(control[r.task_id]["input_tokens"] for r in runs if r.solved)
-    print(f"\nslicer promotion ({rep.attempted} large-module tasks, live) vs frozen control-eval:")
+    ctrl_tok = sum(control[r.task_id]["input_tokens"] for r in runs)
+    label = "DRY RUN (mock model — plumbing only, verdict not meaningful)" if mock else "live"
+    print(f"\nslicer promotion ({rep.attempted} large-module tasks, {label}) vs frozen control-eval:")
     print(f"  slicer:  solved {rep.solved}/{rep.attempted}, tok/solved {rep.tokens_per_solved:.0f}, "
           f"turns/attempt {rep.turns_per_attempt:.1f}, p95 {rep.p95_tokens}, max {rep.max_tokens}")
     print(f"  control: solved {ctrl_solved}/{rep.attempted}, tok/solved "
@@ -635,6 +654,7 @@ def main() -> None:
 
     prm = sub.add_parser("promote-large")
     prm.add_argument("--model", default="claude-sonnet-4-5")
+    prm.add_argument("--mock", action="store_true", help="scripted fake model; plumbing only")
 
     args = parser.parse_args()
     if args.cmd == "prepare":
@@ -658,7 +678,7 @@ def main() -> None:
     elif args.cmd == "slice":
         slice_cmd(args.task, args.eval)
     elif args.cmd == "promote-large":
-        promote_large(args.model)
+        promote_large(args.model, mock=args.mock)
     else:
         report()
 
