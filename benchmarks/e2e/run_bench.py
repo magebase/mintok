@@ -20,6 +20,12 @@ Subcommands:
   oracle --arm A --arm B             offline oracle router over two arms' run records:
                                      per-task cheaper-solver selection, upper bound on
                                      routing headroom (zero agent runs)
+  route --task ID                    deterministic pre-flight routing decision for one task
+  route --eval                       route every generated task from pre-flight features
+                                     only (wording + target LOC), log predictions with
+                                     actual outcomes to runs/router-predictions.jsonl,
+                                     and score the routed system against uniform arms
+                                     (zero agent runs; slicer routes fall back to control)
 """
 
 from __future__ import annotations
@@ -45,6 +51,9 @@ from tasks import TASKS  # noqa: E402
 
 VENV_PY = HARNESS_ROOT / ".venv" / "bin" / "python"
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
+E2E_DIR = Path(__file__).resolve().parent
+FIXTURES = E2E_DIR / "fixtures"
+TASKS_JSON = E2E_DIR / "tasks_generated.json"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GENERATED_TASKS = Path(__file__).resolve().parent / "tasks_generated.json"
 PROMPT_OVERHEAD_TOKENS = 250  # arm rules + JSON report instructions, identical for both arms
@@ -379,6 +388,95 @@ def oracle(arms: list[str]) -> None:
     print(f"routes: " + ", ".join(f"{arm}: {n}" for arm, n in chosen.items()))
 
 
+def _task_sizes(repo: str, instruction: str) -> dict[str, int]:
+    """LOC of .py paths named in the instruction, from the pristine fixture."""
+    import re as _re
+
+    root = FIXTURES / repo
+    sizes = {}
+    for path in set(_re.findall(r"[\w./-]+\.py", instruction)):
+        f = root / path
+        if f.is_file():
+            sizes[path] = sum(1 for _ in f.open(errors="replace"))
+    return sizes
+
+
+def route_cmd(task_id: str | None, eval_all: bool) -> None:
+    """Deterministic pre-flight router: decide, log, and score offline."""
+    from mintok.router import BACKEND_CONTROL, BACKEND_SLICER, PreFlightFeatures, prediction_record, route
+
+    tasks = {t["id"]: t for t in json.loads(TASKS_JSON.read_text())}
+    if task_id is not None:
+        task = tasks[task_id]
+        feats = PreFlightFeatures(task["instruction"], _task_sizes(task["repo"], task["instruction"]))
+        dec = route(feats)
+        print(f"{task_id}: backend={dec.backend} class={dec.predicted_class} "
+              f"expected_cost={dec.expected_relative_cost:.2f} confidence={dec.confidence:.2f}")
+        for reason in dec.reasons:
+            print(f"  - {reason}")
+        return
+
+    arms = {}
+    for arm in ("control-eval", "C-eval"):
+        arms[arm] = {json.loads(l)["task_id"]: json.loads(l)
+                     for l in (RUNS_DIR / f"{arm}.jsonl").read_text().splitlines() if l.strip()}
+
+    # Ideal backend per true stratum, from the frozen-eval per-stratum table
+    # (api/lookup/feature/schema -> C; cross/refactor -> control; large -> slicer).
+    IDEAL_SEMANTIC = {"api_signature_propagation", "simple_lookup", "feature_addition", "schema_or_framework_change"}
+
+    records, routed_solved, routed_tokens, routed_max = [], 0, 0, 0
+    klass_stats, backend_correct = {}, [0, 0]
+    for task_id, task in sorted(tasks.items()):
+        feats = PreFlightFeatures(task["instruction"], _task_sizes(task["repo"], task["instruction"]))
+        dec = route(feats)
+        backend = BACKEND_CONTROL if dec.backend == BACKEND_SLICER else dec.backend
+        actual_arm = arms["C-eval" if backend == "semantic-C" else "control-eval"][task_id]
+        actual = {
+            arm_: {
+                "tokens": arms[f"{a}-eval"][task_id]["input_tokens"],
+                "solved": arms[f"{a}-eval"][task_id]["solved"],
+            }
+            for arm_, a in (("control", "control"), ("semantic-C", "C"))
+        }
+        rec = prediction_record(task_id, feats, dec, actual=actual)
+        rec["actual"] = actual
+        records.append(rec)
+
+        true_klass = task["klass"]
+        stats = klass_stats.setdefault(true_klass, [0, 0])
+        stats[1] += 1
+        if dec.predicted_class == true_klass:
+            stats[0] += 1
+        ideal = "semantic-C" if true_klass in IDEAL_SEMANTIC else BACKEND_CONTROL
+        backend_correct[1] += 1
+        if backend == ideal:
+            backend_correct[0] += 1
+        routed_solved += actual_arm["solved"]
+        routed_tokens += actual_arm["input_tokens"]
+        routed_max = max(routed_max, actual_arm["input_tokens"])
+
+    out = RUNS_DIR / "router-predictions.jsonl"
+    out.write_text("".join(json.dumps(r) + "\n" for r in records))
+
+    n = len(records)
+    print(f"pre-flight router over {n} tasks (wording + target LOC only):")
+    print(f"  exact-class accuracy: {sum(s[0] for s in klass_stats.values())}/{n}; "
+          f"backend accuracy: {backend_correct[0]}/{n}")
+    for klass, (ok, tot) in sorted(klass_stats.items()):
+        print(f"    {klass:32s} {ok:3d}/{tot}")
+    print(f"  routes: " + ", ".join(
+        f"{b}: {sum(1 for r in records if r['backend'] == b)}"
+        for b in (BACKEND_CONTROL, "semantic-C", BACKEND_SLICER)))
+    print(f"  routed system (slicer->control): solved {routed_solved}/{n}, "
+          f"tok/attempt {routed_tokens / n:.0f}, max {routed_max}")
+    ctrl = sum(r["actual"]["control"]["tokens"] for r in records)
+    sem = sum(r["actual"]["semantic-C"]["tokens"] for r in records)
+    print(f"  vs uniform: control {ctrl / n:.0f} ({ctrl / routed_tokens:.2f}x routed), "
+          f"C {sem / n:.0f} ({sem / routed_tokens:.2f}x routed)")
+    print(f"  predictions logged: {out}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="e2e")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -415,6 +513,10 @@ def main() -> None:
     orc = sub.add_parser("oracle")
     orc.add_argument("--arm", action="append", required=True)
 
+    rte = sub.add_parser("route")
+    rte.add_argument("--task", default=None)
+    rte.add_argument("--eval", action="store_true")
+
     args = parser.parse_args()
     if args.cmd == "prepare":
         prepare(args.dest, args.task)
@@ -432,6 +534,8 @@ def main() -> None:
         replay(args.logs, args.out)
     elif args.cmd == "oracle":
         oracle(args.arm)
+    elif args.cmd == "route":
+        route_cmd(args.task, args.eval)
     else:
         report()
 
