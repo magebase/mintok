@@ -25,7 +25,7 @@ Feature: Agent ABI
 
   @domain
   Scenario: The exposed tool surface is tiny
-    Then the agent tool surface is exactly "query, change, add, verify"
+    Then the agent tool surface is exactly "query, change, add, codemod, verify"
     And the agent tool surface costs at most 300 tokens
 
   @domain
@@ -193,6 +193,70 @@ Feature: Agent ABI
     And the packet includes "callers"
     And the packet includes "source:"
     And the packet includes "tests:"
+
+  @domain
+  Scenario: One batch query answers several read questions in one call
+    Given the repository is compiled
+    When the agent batch-queries "symbol:billing:Payment.refund callers:billing:Gateway.refund writers:refunded_amount"
+    Then the answer includes "== symbol:billing:Payment.refund"
+    And the answer includes "refund(self, amount: int) -> bool"
+    And the answer includes "== callers:billing:Gateway.refund"
+    And the answer includes "billing:Payment.refund 1.00"
+    And the answer includes "== writers:refunded_amount"
+
+  @domain
+  Scenario: A batch query with an unknown op is rejected like a single query
+    Given the repository is compiled
+    When the agent batch-queries "symbol:billing:MAX_RETRIES bogus:nowhere"
+    Then the batch is rejected with "valid ops:"
+
+  @integration
+  Scenario: The rename codemod updates the definition and bare references
+    Given a repository file "pricing.py":
+      """
+      def legacy_price(amount: int) -> int:
+          return amount * 2
+
+
+      def quote(amount: int) -> int:
+          return legacy_price(amount) + 1
+      """
+    Given the repository is compiled
+    When the agent renames "pricing:legacy_price" to "current_price"
+    Then the codemod is accepted
+    And the file "pricing.py" includes the line "def current_price(amount: int) -> int:"
+    And the file "pricing.py" includes the line "current_price(amount) + 1"
+    And the symbol "pricing:current_price" is in the IR
+    And the symbol "pricing:legacy_price" is gone from the IR
+
+  @integration
+  Scenario: Renaming a method is rejected because receiver types are unresolved
+    Given the repository is compiled
+    When the agent renames "billing:Gateway.refund" to "payout"
+    Then the codemod is rejected with "receiver-type"
+
+  @integration
+  Scenario: The add-parameter codemod appends a defaulted parameter
+    Given the repository is compiled
+    When the agent adds parameter "fee" with default "0.0" to "billing:Payment.refund"
+    Then the codemod is accepted
+    And the file "billing.py" includes the line "def refund(self, amount: int, fee=0.0) -> bool:"
+
+  @integration
+  Scenario: The add-import codemod splices after __future__ imports
+    Given a repository file "modfuture2.py":
+      """
+      from __future__ import annotations
+
+
+      def existing() -> bool:
+          return True
+      """
+    Given the repository is compiled
+    When the agent adds the import "from billing import MAX_RETRIES" to "modfuture2.py"
+    Then the codemod is accepted
+    And the file "modfuture2.py" includes the line "from billing import MAX_RETRIES"
+    And the line "from __future__ import annotations" comes first in "modfuture2.py"
 
   @integration
   Scenario: A patch replaces a line range and keeps the file parseable

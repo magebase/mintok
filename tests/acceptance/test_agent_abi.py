@@ -30,6 +30,72 @@ def query_symbol(ctx: SimpleNamespace, repo: Path, sid: str) -> None:
     ctx.answer = ctx.abi.query("symbol", sid)
 
 
+@when(parsers.parse('the agent batch-queries "{spec}"'))
+def batch_query(ctx: SimpleNamespace, repo: Path, spec: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.answer = ctx.abi.query("batch", spec)
+        ctx.batch_error = None
+    except (KeyError, ValueError) as exc:
+        ctx.answer = ""
+        ctx.batch_error = str(exc)
+
+
+@then(parsers.parse('the batch is rejected with "{text}"'))
+def batch_rejected(ctx: SimpleNamespace, text: str) -> None:
+    assert ctx.batch_error is not None and text in ctx.batch_error, ctx.batch_error
+
+
+@when(parsers.parse('the agent renames "{sid}" to "{new_name}"'))
+def codemod_rename(ctx: SimpleNamespace, repo: Path, sid: str, new_name: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.codemod = ctx.abi.codemod("rename", target=sid, to=new_name)
+        ctx.codemod_error = None
+    except ChangeRejected as exc:
+        ctx.codemod = None
+        ctx.codemod_error = str(exc)
+
+
+@when(parsers.parse('the agent adds parameter "{name}" with default "{default}" to "{sid}"'))
+def codemod_add_parameter(
+    ctx: SimpleNamespace, repo: Path, name: str, default: str, sid: str
+) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.codemod = ctx.abi.codemod("add_parameter", target=sid, name=name, default=default)
+        ctx.codemod_error = None
+    except ChangeRejected as exc:
+        ctx.codemod = None
+        ctx.codemod_error = str(exc)
+
+
+@when(parsers.parse('the agent adds the import "{statement}" to "{path}"'))
+def codemod_add_import(ctx: SimpleNamespace, repo: Path, statement: str, path: str) -> None:
+    ctx.abi = AgentABI(repo, ctx.ir)
+    try:
+        ctx.codemod = ctx.abi.codemod("add_import", file=path, statement=statement)
+        ctx.codemod_error = None
+    except ChangeRejected as exc:
+        ctx.codemod = None
+        ctx.codemod_error = str(exc)
+
+
+@then("the codemod is accepted")
+def codemod_accepted(ctx: SimpleNamespace) -> None:
+    assert ctx.codemod_error is None, ctx.codemod_error
+
+
+@then(parsers.parse('the codemod is rejected with "{text}"'))
+def codemod_rejected(ctx: SimpleNamespace, text: str) -> None:
+    assert ctx.codemod_error is not None and text in ctx.codemod_error, ctx.codemod_error
+
+
+@then(parsers.parse('the symbol "{sid}" is in the IR'))
+def symbol_in_ir(ctx: SimpleNamespace, sid: str) -> None:
+    assert sid in ctx.abi.ir.symbols, sorted(ctx.abi.ir.symbols)[:10]
+
+
 @then(parsers.parse('the answer includes "{text}"'))
 def answer_includes(ctx: SimpleNamespace, text: str) -> None:
     assert text in ctx.answer, ctx.answer

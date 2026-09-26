@@ -92,6 +92,25 @@ POLICIES: dict[str, dict] = {
         "ops": READ_OPS | ATTRIBUTION_OPS | {"inspect"},
         "breaker": True,
     },
+    # H: C + adaptive multi-query batching (turn-reduction experiment)
+    "H": {
+        "tools": {"shell", "read", "suite"},
+        "ops": READ_OPS | ATTRIBUTION_OPS | {"batch"},
+        "breaker": False,
+    },
+    # I: C + shell-output virtualization (raw stdout never reaches context)
+    "I": {
+        "tools": {"shell", "read", "suite", "result"},
+        "ops": READ_OPS | ATTRIBUTION_OPS,
+        "breaker": False,
+        "virtual_shell": True,
+    },
+    # J: C + deterministic codemods (no freeform semantic edits)
+    "J": {
+        "tools": {"shell", "read", "suite", "codemod"},
+        "ops": READ_OPS | ATTRIBUTION_OPS,
+        "breaker": False,
+    },
 }
 
 
@@ -192,6 +211,20 @@ def main(argv: list[str] | None = None) -> int:
     verify = sub.add_parser("verify", help="run a check command via the mintok ABI")
     verify.add_argument("argv", nargs="+")
 
+    codemod = sub.add_parser("codemod", help="deterministic structural transform (arm J)")
+    codemod.add_argument("op", choices=["rename", "add_parameter", "add_import"])
+    codemod.add_argument("--target", help="symbol id (rename, add_parameter)")
+    codemod.add_argument("--to", help="new identifier (rename)")
+    codemod.add_argument("--name", help="parameter name (add_parameter)")
+    codemod.add_argument("--default", help="parameter default (add_parameter)")
+    codemod.add_argument("--file", help="file path (add_import)")
+    codemod.add_argument("--statement", help="import line (add_import)")
+
+    result = sub.add_parser("result", help="page or search virtualized shell output (arm I)")
+    result.add_argument("handle", help="output handle, e.g. R3")
+    result.add_argument("action", choices=["page", "find"])
+    result.add_argument("spec", nargs="?", default="", help="start-end (page) or pattern (find)")
+
     suite = sub.add_parser("suite", help="run the task copy's full test suite")
     suite.add_argument("--quiet", action="store_true")
 
@@ -225,7 +258,68 @@ def main(argv: list[str] | None = None) -> int:
         proc = subprocess.run(
             args.command, shell=True, cwd=args.root, capture_output=True, text=True, timeout=600
         )
-        return finish((proc.stdout + proc.stderr).rstrip(), proc.returncode)
+        output = (proc.stdout + proc.stderr).rstrip()
+        if policy.get("virtual_shell"):
+            # Virtualization: the raw stream is stored locally; the agent sees
+            # a capped head plus a handle it can page or search on demand.
+            out_dir = args.log.parent / "shellout"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            handles = sorted(out_dir.glob(f"{args.log.stem}-R*.txt"))
+            n = (int(handles[-1].stem.rsplit("-R", 1)[1]) + 1) if handles else 1
+            full_path = out_dir / f"{args.log.stem}-R{n}.txt"
+            full_path.write_text(output)
+            lines = output.splitlines()
+            head = "\n".join(lines[:40])
+            summary = (
+                f"{head}\n"
+                f"[R{n}] {len(lines)} lines, exit {proc.returncode}; full: {full_path}\n"
+                f"page: result R{n} page 40-80 | find: result R{n} find PATTERN"
+            )
+            return finish(summary, proc.returncode)
+        return finish(output, proc.returncode)
+
+    if args.tool == "result":
+        entry["args"] = {"handle": args.handle, "action": args.action, "spec": args.spec}
+        full_path = args.log.parent / "shellout" / f"{args.log.stem}-{args.handle}.txt"
+        if not full_path.is_file():
+            return finish(f"error: no stored output {args.handle}", 1)
+        lines = full_path.read_text().splitlines()
+        if args.action == "page":
+            try:
+                start_s, end_s = args.spec.split("-", 1)
+                start, end = int(start_s), int(end_s)
+            except ValueError:
+                return finish("error: page spec is START-END", 1)
+            window = lines[max(start, 1) - 1 : min(end, start + 199)]
+            out = "\n".join(f"{i}  {lines[i - 1]}" for i in range(max(start, 1), max(start, 1) + len(window)))
+            return finish(out if out else "(empty range)", 0)
+        if not args.spec:
+            return finish("error: find needs a pattern", 1)
+        hits = [
+            f"{i}  {line}"
+            for i, line in enumerate(lines, 1)
+            if args.spec.lower() in line.lower()
+        ]
+        body = "\n".join(hits[:60])
+        note = f"\n({len(hits)} hits, showing {min(len(hits), 60)})" if len(hits) > 60 else ""
+        return finish((body + note) if body else "(no hits)", 0)
+
+    if args.tool == "codemod":
+        entry["args"] = {
+            k: getattr(args, k)
+            for k in ("op", "target", "to", "name", "default", "file", "statement")
+            if getattr(args, k) is not None
+        }
+        if "codemod" not in policy["tools"]:
+            return finish(f"locked: tool 'codemod' not in policy {args.policy}", 3)
+        try:
+            abi = AgentABI(args.root)
+            kw = {k: v for k, v in entry["args"].items() if k != "op"}
+            result = abi.codemod(args.op, **kw)
+            output = f"codemod {args.op} ok: {result}"
+        except Exception as exc:  # noqa: BLE001 - the agent sees the failure
+            return finish(f"rejected: {exc}", 1)
+        return finish(output, 0)
 
     if args.tool == "query":
         entry["args"] = {"op": args.op, "target": args.target}

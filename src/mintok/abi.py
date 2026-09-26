@@ -16,30 +16,32 @@ from mintok.tokens import estimate_tokens
 
 # The open protocol reserves the ``slice`` query op for the commercial MinTok
 # Inference Compiler; the open reference build implements the deterministic ops below.
-OPEN_QUERY_OPS = ("symbol", "effects", "callers", "find", "writers", "summary")
+OPEN_QUERY_OPS = ("symbol", "effects", "callers", "find", "writers", "summary", "batch")
 
 TOOL_SURFACE: list[dict] = [
     {
         "name": "query",
-        "description": (
-            "Read semantic facts. op: symbol|effects|callers|find|writers|summary"
-            " (slice: commercial build)"
-        ),
-        "params": {"op": "str", "target": "symbol id | name pattern | attribute"},
+        "description": "Read facts. op: symbol|effects|callers|find|writers|summary"
+        "|batch 'op:t op:t'|slice(commercial)",
+        "params": {"op": "str", "target": "id | pattern | attr"},
     },
     {
         "name": "change",
-        "description": "Replace one symbol's definition with new source, or remove it (remove op)",
-        "params": {"target": "symbol id", "source": "str"},
+        "description": "Replace one symbol's definition, or remove (remove op)",
+        "params": {"target": "id", "source": "str"},
     },
     {
         "name": "add",
-        "description": "Create a new top-level symbol in an existing or new module file",
-        "params": {"target": "new symbol id", "module": "file path", "source": "str"},
+        "description": "Create a top-level symbol (new module ok)",
+        "params": {"target": "new id", "module": "path", "source": "str"},
+    },
+    {
+        "name": "codemod",
+        "description": "Deterministic: rename id->to | add_parameter id n=dflt | add_import file stmt",
     },
     {
         "name": "verify",
-        "description": "Run a check command; returns pass/fail and output tail",
+        "description": "Run a check command; pass/fail + tail",
         "params": {"argv": "list[str]"},
     },
 ]
@@ -183,6 +185,25 @@ class AgentABI:
         return "\n".join(lines[sym.source.start_line - 1 : sym.source.end_line])
 
     def query(self, op: str, target: str) -> str:
+        if op == "batch":
+            return self.query_batch(target)
+        return self._query_one(op, target)
+
+    def query_batch(self, spec: str) -> str:
+        """One call answering several read questions, one compact section each.
+
+        Turn-count lever: related questions about one target (signature,
+        callers, writers) cost a single round trip instead of three. Spec
+        format: "op:target op:target ..." (the same ops as single queries,
+        except batch itself). Fails as a whole on the first bad spec.
+        """
+        parts = spec.replace(",", " ").split()
+        if not parts:
+            raise ValueError("empty batch spec; expected 'op:target op:target ...'")
+        sections = [f"== {part}\n{self._query_one(*part.split(':', 1))}" for part in parts]
+        return "\n".join(sections)
+
+    def _query_one(self, op: str, target: str) -> str:
         if op == "symbol":
             return self.get_symbol(target)
         if op == "effects":
@@ -200,7 +221,134 @@ class AgentABI:
                 "slicing is part of the commercial MinTok Inference Compiler; "
                 "this open build does not include it (see README.md)"
             )
-        raise ValueError(f"unknown query op {op!r}")
+        raise ValueError(f"unknown query op {op!r}; valid ops: {', '.join(OPEN_QUERY_OPS)}")
+
+    def codemod(self, op: str, **kwargs: str) -> Symbol | str:
+        """Deterministic structural transforms; the model emits only arguments.
+
+        v1 ops (each compiles the tree and reindexes after writing):
+        rename        module-level symbol: definition + bare-name references
+        add_parameter append ``name=default`` to a single-line signature
+        add_import    splice one import line after __future__ imports
+        """
+        if op == "rename":
+            return self._rename_symbol(kwargs["target"], kwargs["to"])
+        if op == "add_parameter":
+            return self._add_parameter(kwargs["target"], kwargs["name"], kwargs["default"])
+        if op == "add_import":
+            return self._add_import(kwargs["file"], kwargs["statement"])
+        raise ChangeRejected(f"unknown codemod op {op!r}; valid ops: rename, add_parameter, add_import")
+
+    def _python_files(self) -> list[Path]:
+        skip = {"__pycache__", ".venv", ".git", "node_modules"}
+        return sorted(
+            p
+            for p in self.root.rglob("*.py")
+            if not (set(p.parts) & skip or p.is_symlink())
+        )
+
+    def _apply_edits(self, path: Path, edits: list[tuple[int, int, str]]) -> None:
+        """Apply absolute (start, end, replacement) edits; parse-check the file."""
+        text = path.read_text()
+        for start, end, replacement in sorted(edits, key=lambda e: e[0], reverse=True):
+            text = text[:start] + replacement + text[end:]
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"{path.relative_to(self.root)} would not parse: {exc.msg}") from None
+        path.write_text(text)
+
+    def _rename_symbol(self, symbol_id: str, new_name: str) -> Symbol:
+        sym = self._symbol(symbol_id)
+        short = sym.name.rsplit(".", 1)[-1]
+        if "." in sym.name:
+            raise ChangeRejected(
+                "method rename needs receiver-type resolution; not supported — use change"
+            )
+        if not new_name.isidentifier():
+            raise ChangeRejected(f"{new_name!r} is not a valid identifier")
+        if any(s.name.rsplit(".", 1)[-1] == new_name for s in self.ir.symbols.values()):
+            raise ChangeRejected(f"{new_name!r} already exists in the index")
+        changed = 0
+        for path in self._python_files():
+            tree = ast.parse(path.read_text())
+            edits: list[tuple[int, int, str]] = []
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == short:
+                    # node.col_offset points at the def/class keyword; the name
+                    # token follows the keyword prefix on the same line.
+                    keyword = {ast.ClassDef: "class ", ast.FunctionDef: "def ", ast.AsyncFunctionDef: "async def "}[type(node)]
+                    off = self._offset(path, node.lineno, node.col_offset) + len(keyword)
+                    edits.append((off, off + len(short), new_name))
+                elif isinstance(node, ast.Name) and node.id == short:
+                    off = self._offset(path, node.lineno, node.col_offset)
+                    edits.append((off, off + len(short), new_name))
+                elif isinstance(node, ast.ImportFrom) and any(
+                    a.name == short and a.asname in (None, short) for a in node.names
+                ):
+                    for a in node.names:
+                        if a.name == short:
+                            off = self._offset(path, a.lineno, a.col_offset)
+                            edits.append((off, off + len(a.name), new_name))
+            if edits:
+                self._apply_edits(path, edits)
+                changed += 1
+        self.ir = compile_repository(self.root)
+        module = symbol_id.split(":", 1)[0]
+        new_id = f"{module}:{new_name}"
+        if new_id not in self.ir.symbols:
+            raise ChangeRejected(f"{new_id} was not indexed after rename")
+        return self.ir.symbols[new_id]
+
+    def _offset(self, path: Path, lineno: int, col_offset: int) -> int:
+        lines = path.read_text().splitlines(keepends=True)
+        return sum(len(l) for l in lines[: lineno - 1]) + col_offset
+
+    def _add_parameter(self, symbol_id: str, name: str, default: str) -> Symbol:
+        sym = self._symbol(symbol_id)
+        if sym.kind not in ("function", "method"):
+            raise ChangeRejected(f"{symbol_id} is a {sym.kind}; parameters apply to functions")
+        if not name.isidentifier():
+            raise ChangeRejected(f"{name!r} is not a valid identifier")
+        path = self.root / sym.source.path
+        lines = path.read_text().splitlines()
+        line_no = sym.source.start_line - 1
+        line = lines[line_no]
+        open_paren = line.find("(")
+        close_paren = line.rfind(")")
+        if open_paren == -1 or close_paren < open_paren or "*" in line[open_paren : close_paren]:
+            raise ChangeRejected("only single-line signatures without */** are supported")
+        params = line[open_paren + 1 : close_paren].strip()
+        addition = f"{name}={default}" if not params else f"{params}, {name}={default}"
+        new_line = line[: open_paren + 1] + addition + line[close_paren:]
+        updated = lines[:line_no] + [new_line] + lines[line_no + 1 :]
+        text = "\n".join(updated) + "\n"
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"file would not parse after add_parameter: {exc.msg}") from None
+        path.write_text(text)
+        self.ir = compile_repository(self.root)
+        return self.ir.symbols[symbol_id]
+
+    def _add_import(self, file_path: str, statement: str) -> str:
+        statement = statement.strip()
+        if not (statement.startswith("import ") or statement.startswith("from ")):
+            raise ChangeRejected("statement must be an import line")
+        path = self.root / file_path
+        if not path.is_file():
+            raise ChangeRejected(f"unknown file {file_path}")
+        text = path.read_text()
+        if statement in text.splitlines():
+            raise ChangeRejected(f"{file_path} already imports this")
+        new_text = _splice_imports(text, [statement])
+        try:
+            ast.parse(new_text)
+        except SyntaxError as exc:
+            raise ChangeRejected(f"file would not parse after add_import: {exc.msg}") from None
+        path.write_text(new_text)
+        self.ir = compile_repository(self.root)
+        return f"{file_path}: {statement}"
 
     def change(self, symbol_id: str, source: str) -> ChangeResult:
         sym = self._symbol(symbol_id)
