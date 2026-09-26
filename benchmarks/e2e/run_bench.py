@@ -26,6 +26,11 @@ Subcommands:
                                      actual outcomes to runs/router-predictions.jsonl,
                                      and score the routed system against uniform arms
                                      (zero agent runs; slicer routes fall back to control)
+  slice --task ID                    render the deterministic slice package for one task
+  slice --eval                       sizing check: slice every large-module task from
+                                     pre-flight info and report package tokens vs the
+                                     arms' actual tool-context (sizing only — not a
+                                     solve prediction; the oracle waits for real runs)
 """
 
 from __future__ import annotations
@@ -477,6 +482,43 @@ def route_cmd(task_id: str | None, eval_all: bool) -> None:
     print(f"  predictions logged: {out}")
 
 
+def slice_cmd(task_id: str | None, eval_all: bool) -> None:
+    """Deterministic slice backend: render packages and size them offline."""
+    from mintok.slicer import slice_task
+
+    tasks = {t["id"]: t for t in json.loads(TASKS_JSON.read_text())}
+    if task_id is not None:
+        task = tasks[task_id]
+        pkg = slice_task(FIXTURES / task["repo"], task["instruction"])
+        print(pkg.text)
+        print(f"[package {pkg.tokens} tokens, budget {pkg.budget}"
+              f"{', TRUNCATED' if pkg.truncated else ''}]")
+        return
+
+    tasks = {t["id"]: t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"}
+    arms = {}
+    for arm in ("control-eval", "C-eval"):
+        arms[arm] = {json.loads(l)["task_id"]: json.loads(l)
+                     for l in (RUNS_DIR / f"{arm}.jsonl").read_text().splitlines() if l.strip()}
+    rows = []
+    for task_id, task in sorted(tasks.items()):
+        pkg = slice_task(FIXTURES / task["repo"], task["instruction"])
+        rows.append((task_id, pkg.tokens, pkg.truncated,
+                     arms["control-eval"][task_id]["input_tokens"],
+                     arms["C-eval"][task_id]["input_tokens"],
+                     arms["control-eval"][task_id]["solved"],
+                     arms["C-eval"][task_id]["solved"]))
+    print(f"slice sizing over {len(rows)} large-module tasks (deterministic, zero runs):")
+    print(f"  {'task':22s}{'pkg_tok':>8}{'trunc':>7}{'ctrl_tok':>9}{'C_tok':>7}{'ctrl_ok':>8}{'C_ok':>6}")
+    for task_id, ptok, trunc, ctok, mtok, cok, mok in rows:
+        print(f"  {task_id:22s}{ptok:>8}{('Y' if trunc else 'n'):>7}{ctok:>9}{mtok:>7}{str(cok):>8}{str(mok):>6}")
+    avg = sum(r[1] for r in rows) / len(rows)
+    ctrl = sum(r[3] for r in rows) / len(rows)
+    print(f"  avg package {avg:.0f} tok vs control avg {ctrl:.0f} tok of tool-context "
+          f"({ctrl / avg:.1f}x headroom); pre-registered bar: <=800 tok/solved good, "
+          "<=600 strong, <=400 excellent at control's solve rate")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="e2e")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -517,6 +559,10 @@ def main() -> None:
     rte.add_argument("--task", default=None)
     rte.add_argument("--eval", action="store_true")
 
+    slc = sub.add_parser("slice")
+    slc.add_argument("--task", default=None)
+    slc.add_argument("--eval", action="store_true")
+
     args = parser.parse_args()
     if args.cmd == "prepare":
         prepare(args.dest, args.task)
@@ -536,6 +582,8 @@ def main() -> None:
         oracle(args.arm)
     elif args.cmd == "route":
         route_cmd(args.task, args.eval)
+    elif args.cmd == "slice":
+        slice_cmd(args.task, args.eval)
     else:
         report()
 

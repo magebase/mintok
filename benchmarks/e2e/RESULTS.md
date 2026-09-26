@@ -540,3 +540,41 @@ control, so the remaining lever is a backend that beats control's
 plus one more genuinely high-leverage deterministic backend (repetitive
 propagation via transforms, revisit caching). Routing then composes the
 specialized wins.
+
+### Slicer backend: built, sized offline, bar pre-registered
+
+`mintok.slicer` is the third backend for giant modules, deliberately
+dumb by design: from the Agent Program IR it ranks **exact source
+regions** — definitions matched by instruction identifiers (a method
+beats its own class), call-edge callers, field-write sites, and
+test-file mentions — and renders `file:line` excerpts. No narration, no
+summaries, no symbol packets; full source is an explicit agent-initiated
+fallback the slicer itself never takes. Hard budgets cap the packet
+failure mode: initial slice ≤ 800 tokens, expanded ≤ 2,000 (taken only
+when the primary definition itself needs it).
+
+Offline sizing over the 15 large-module tasks (package rendered from the
+pristine fixture + instruction; zero agent runs; `slice --eval`):
+
+| statistic | value |
+|---|---|
+| avg package | **358 tokens** (control's actual tool-context avg: 1,093) |
+| packages within the initial 800 budget | 13/15 |
+| largest package | 1,786 (expanded budget; a class-level target) |
+| headroom if solve rate holds | ~3.1x on tool-context |
+
+**Pre-registered promotion criteria** (written before any slicer
+trajectory exists; live runs go through FAST-8 → sequential dev first):
+
+- solve rate ≥ control's 15/15 on the stratum;
+- tokens/solved ≤ 800 = good, ≤ 600 = strong, ≤ 400 = excellent
+  (control: 1,093).
+
+Per the no-aspirational-oracle rule, the 3-backend oracle
+(control/C/slicer) is **not** computed from these hypothetical packages —
+only from real slicer trajectories once the live run produces them. The
+next benchmark after slicer tuning must be a genuinely fresh holdout
+(100–200 new tasks, wording uninspected during tuning) with prompts,
+distribution, snapshots, checkers, router rules, and model config frozen
+before the run; that result decides whether the 1.4x routing claim
+survives contact with an unseen instruction set.

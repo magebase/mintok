@@ -132,6 +132,8 @@ src/mintok/
   records.py          open JSONL record formats (agent sessions, benchmark runs)
   profiler.py         avoidable-spend profiler (published formulas; capped at total spend)
   benchmark.py        Agent Efficiency Benchmark runner, paired report, savings summary
+  router.py           deterministic pre-flight task router (wording + target LOC only)
+  slicer.py           large-module slice backend (ranked file:line regions, hard budgets)
   abi.py              Agent ABI + compact tool surface (query / change / add / verify)
   pack.py             relearn packs: only interface-hash changes, body-only skipped
   bench.py            deterministic context-token benchmark vs grep-and-paging
