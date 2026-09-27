@@ -151,7 +151,10 @@ def check_task(root: Path, task_id: str, checker_src: str, log: Path) -> dict:
     detail = "" if check_ok else (err_text.splitlines()[-1] if err_text else "checker failed")
 
     entries = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.exists() else []
-    task = task_by_id(task_id) if task_id in {t["id"] for t in json.loads(TASKS_JSON.read_text())} else {"instruction": ""}
+    try:
+        task = task_by_id(task_id)
+    except SystemExit:
+        task = {"instruction": ""}
     tool_output_tokens = sum(estimate_tokens(e.get("output", "")) for e in entries)
     tool_input_tokens = sum(estimate_tokens(json.dumps(e.get("args", ""))) for e in entries)
     latency = (entries[-1]["ts"] - entries[0]["ts"]) if len(entries) > 1 else 0.0
@@ -926,8 +929,10 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic", h
             print(f"    max:               {max(bs):.2f}x")
 
         # Template family breakdown
+        task_map = {t["id"]: t for t in tasks}
         by_family: dict[str, dict] = {}
-        for t, r, u_s, u_c in zip(tasks, runs, slicer_usage, control_usage):
+        for r, u_s, u_c in zip(runs, slicer_usage, control_usage):
+            t = task_map.get(r.task_id, {})
             fam = t.get("template", "unknown")
             if fam not in by_family:
                 by_family[fam] = {

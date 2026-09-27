@@ -244,9 +244,9 @@ def run_loop(
             stop, blocks, usage = completion(model, system, messages, tools=tools)[:3]
             meta = {}
         else:
-            from model_runner import build_request, _urllib_transport
+            from model_runner import build_request, _urllib_transport, resolve_api_key
 
-            api_key = os.environ[provider_key_env(provider)]
+            api_key = resolve_api_key(provider)
             # build_request flattens internal blocks to the provider wire
             # exactly once; pre-flattening here would strip tool_call_id.
             url, headers, body = build_request(

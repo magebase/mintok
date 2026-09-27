@@ -40,6 +40,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 import subprocess
 import sys
 import time
@@ -283,10 +285,31 @@ def main(argv: list[str] | None = None) -> int:
         if not gated("shell"):
             state = breaker_state(args.log)
             return finish(f"locked: {breaker_report(state)}", 3)
-        proc = subprocess.run(
-            args.command, shell=True, cwd=args.root, capture_output=True, text=True, timeout=600
-        )
-        output = (proc.stdout + proc.stderr).rstrip()
+        if re.search(r"(holdout_solutions|tasks_holdout|\.\./)", args.command):
+            return finish("locked: shell command attempts to access paths outside the task root", 3)
+        if re.search(r"\bfind\s+/(?:\s|$)|(?:^|[;&|\s])cd\s+/(?:\s|;|&|$)", args.command):
+            return finish("locked: commands escaping the task root to '/' are not permitted; execute relative to task root", 3)
+        try:
+            proc = subprocess.Popen(
+                args.command,
+                shell=True,
+                cwd=args.root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+            )
+            stdout, stderr = proc.communicate(timeout=45)
+            output = (stdout + stderr).rstrip()
+            returncode = proc.returncode
+        except subprocess.TimeoutExpired:
+            try:
+                import signal
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.communicate()
+            except Exception:
+                pass
+            return finish("error: shell command timed out after 45s", 124)
         if policy.get("virtual_shell"):
             # Virtualization: the raw stream is stored locally; the agent sees
             # a capped head plus a handle it can page or search on demand.

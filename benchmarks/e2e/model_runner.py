@@ -63,6 +63,26 @@ def provider_key_env(provider: str) -> str:
     return "OPENROUTER_API_KEY" if provider == "openrouter" else "MINTOK_MODEL_API_KEY"
 
 
+def resolve_api_key(provider: str) -> str:
+    key_env = provider_key_env(provider)
+    val = os.environ.get(key_env)
+    if val and val.strip():
+        return val.strip()
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[2]
+    for fn in (".env.directories", ".env"):
+        env_file = repo_root / fn
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                line = line.strip()
+                if line.startswith(f"{key_env}="):
+                    v = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    if v:
+                        os.environ[key_env] = v
+                        return v
+    return os.environ.get(key_env, "")
+
+
 def build_request(
     provider: str,
     model: str,
@@ -236,7 +256,7 @@ def run_turn(
     generation: dict[str, Any] | None = None,
 ) -> tuple[str, list[dict[str, Any]], UsageRecord, dict[str, Any]]:
     """One agent turn: (stop_reason, content blocks, UsageRecord, request_meta)."""
-    api_key = os.environ.get(provider_key_env(provider))
+    api_key = resolve_api_key(provider)
     if not api_key:
         raise RuntimeError(f"{provider_key_env(provider)} not set")
     if transport is None:

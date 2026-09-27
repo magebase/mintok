@@ -1,0 +1,15 @@
+{
+  "provider": "openrouter",
+  "provider_api_version": "openrouter/v1 (provider-fixed)",
+  "model": "stealth/space-bunny-alpha",
+  "reasoning_effort": "none",
+  "temperature": "0.0",
+  "top_p": "provider-default",
+  "max_output_tokens": "4096",
+  "system_prompt_hash": "32182dcd8d2e494f",
+  "agent_instruction_hash": "062102fbcafd1276",
+  "toolset_hash": "adb3f8eebe8e44d7",
+  "harness_version": "9f1230c",
+  "task_set_hash": "5f94c539c62c0eb4",
+  "repo_snapshot_hashes": "dispatch:e2c97601513af3cf6d88919ccc898f59,inventory:fd324046680940ef01e41f0f0885771a,ledger:d42e0e0c784f69b2682f96987d355a61,metrics:2a8347fec489185c9f534bf21f548cc0"
+}
