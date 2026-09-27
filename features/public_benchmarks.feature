@@ -19,6 +19,13 @@ Feature: Public benchmark adapters and paired evaluation
     And the benchmark identifier is "swe-bench-pro-v2"
     And the fail-to-pass list contains "tests/test_basic.py::test_request"
 
+  Scenario: Terminal-Bench 2.0 task normalizes with environment commands
+    Given a raw Terminal-Bench 2.0 task dictionary with instance id "terminal-bench__tb-01-nginx-conf"
+    When the task is normalized into a public benchmark task
+    Then the task has repository "terminal-bench/env"
+    And the benchmark identifier is "terminal-bench-2.0"
+    And the problem statement matches the issue description
+
   Scenario: Freezing a public benchmark window generates an immutable fingerprint
     Given a public benchmark window containing 3 tasks
     When the window is frozen with window name "swe-rebench-window-1"

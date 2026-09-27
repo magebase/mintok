@@ -16,6 +16,7 @@ from mintok.public_bench import (
     freeze_benchmark_window,
     normalize_swe_bench_pro_task,
     normalize_swe_rebench_task,
+    normalize_terminal_bench_task,
     verify_window_fingerprint,
 )
 
@@ -37,9 +38,23 @@ def raw_swe_rebench_task(ctx: SimpleNamespace, instance_id: str) -> None:
     }
 
 
+@given(parsers.parse('a raw Terminal-Bench 2.0 task dictionary with instance id "{instance_id}"'))
+def raw_terminal_bench_task(ctx: SimpleNamespace, instance_id: str) -> None:
+    ctx.raw = {
+        "instance_id": instance_id,
+        "repo": "terminal-bench/env",
+        "base_commit": "main",
+        "problem_statement": "Fix syntax error in nginx.conf reverse proxy block",
+        "test_cmd": "bash -c './test.sh'",
+        "benchmark": "terminal-bench-2.0",
+    }
+
+
 @when("the task is normalized into a public benchmark task")
 def normalize_task(ctx: SimpleNamespace) -> None:
-    if ctx.raw.get("benchmark") == "swe-bench-pro-v2" or "pallets" in ctx.raw.get("repo", ""):
+    if ctx.raw.get("benchmark") == "terminal-bench-2.0" or "terminal" in ctx.raw.get("instance_id", ""):
+        ctx.task = normalize_terminal_bench_task(ctx.raw)
+    elif ctx.raw.get("benchmark") == "swe-bench-pro-v2" or "pallets" in ctx.raw.get("repo", ""):
         ctx.task = normalize_swe_bench_pro_task(ctx.raw)
     else:
         ctx.task = normalize_swe_rebench_task(ctx.raw)

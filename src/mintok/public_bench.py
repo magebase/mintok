@@ -109,6 +109,25 @@ def normalize_swe_bench_multilingual_task(raw: dict[str, Any]) -> PublicBenchmar
     )
 
 
+def normalize_terminal_bench_task(raw: dict[str, Any]) -> PublicBenchmarkTask:
+    """Normalize task from Terminal-Bench 2.0 (CLI / environment tasks)."""
+    return PublicBenchmarkTask(
+        instance_id=raw["instance_id"],
+        repo=raw.get("repo", "terminal-bench/env"),
+        base_commit=raw.get("base_commit", "main"),
+        problem_statement=raw["problem_statement"],
+        benchmark="terminal-bench-2.0",
+        patch=raw.get("patch", ""),
+        test_patch=raw.get("test_patch", ""),
+        test_cmd=raw.get("test_cmd", "bash -c './test.sh'"),
+        pass_to_pass=list(raw.get("pass_to_pass") or []),
+        fail_to_pass=list(raw.get("fail_to_pass") or []),
+        created_at=raw.get("created_at"),
+        language="bash",
+        extra=raw.get("extra", {}),
+    )
+
+
 def freeze_benchmark_window(tasks: list[PublicBenchmarkTask], window_name: str) -> dict[str, Any]:
     """Freeze an evaluation window with deterministic SHA-256 fingerprint."""
     sorted_tasks = sorted(tasks, key=lambda t: t.instance_id)
@@ -156,6 +175,14 @@ def assert_workspace_isolation(dest: Path, task: PublicBenchmarkTask) -> None:
                 pass
 
 
+def _percentile(vals: list[float] | list[int], q: float) -> float:
+    if not vals:
+        return 0.0
+    s = sorted(vals)
+    idx = min(len(s) - 1, max(0, math.ceil(q * len(s)) - 1))
+    return float(s[idx])
+
+
 @dataclass(frozen=True, slots=True)
 class PublicRunRecord:
     task_id: str
@@ -183,6 +210,10 @@ class PublicBenchmarkReport:
     both_fail: int
     both_solved_ratios: list[float]
     stratification: dict[str, dict[str, Any]]
+    control_tokens_list: list[int] = field(default_factory=list)
+    mintok_tokens_list: list[int] = field(default_factory=list)
+    control_cost_usd: float = 0.0
+    mintok_cost_usd: float = 0.0
 
     @property
     def control_solve_rate(self) -> float:
@@ -193,12 +224,28 @@ class PublicBenchmarkReport:
         return self.mintok_solved / self.total_tasks if self.total_tasks else 0.0
 
     @property
+    def control_tokens_per_attempt(self) -> float:
+        return self.control_tokens / self.total_tasks if self.total_tasks else 0.0
+
+    @property
+    def mintok_tokens_per_attempt(self) -> float:
+        return self.mintok_tokens / self.total_tasks if self.total_tasks else 0.0
+
+    @property
     def control_ptok_per_solved(self) -> float:
         return self.control_tokens / self.control_solved if self.control_solved else 0.0
 
     @property
     def mintok_ptok_per_solved(self) -> float:
         return self.mintok_tokens / self.mintok_solved if self.mintok_solved else 0.0
+
+    @property
+    def control_usd_per_solved(self) -> float:
+        return self.control_cost_usd / self.control_solved if self.control_solved else 0.0
+
+    @property
+    def mintok_usd_per_solved(self) -> float:
+        return self.mintok_cost_usd / self.mintok_solved if self.mintok_solved else 0.0
 
     @property
     def efficiency_multiplier(self) -> float:
@@ -235,6 +282,46 @@ class PublicBenchmarkReport:
         sorted_r = sorted(self.both_solved_ratios)
         return sorted_r[len(sorted_r) // 2]
 
+    @property
+    def both_solved_p25(self) -> float:
+        return _percentile(self.both_solved_ratios, 0.25)
+
+    @property
+    def both_solved_p75(self) -> float:
+        return _percentile(self.both_solved_ratios, 0.75)
+
+    @property
+    def both_solved_p95(self) -> float:
+        return _percentile(self.both_solved_ratios, 0.95)
+
+    @property
+    def both_solved_max(self) -> float:
+        return max(self.both_solved_ratios) if self.both_solved_ratios else 1.0
+
+    @property
+    def control_p50_tokens(self) -> float:
+        return _percentile(self.control_tokens_list, 0.50)
+
+    @property
+    def control_p95_tokens(self) -> float:
+        return _percentile(self.control_tokens_list, 0.95)
+
+    @property
+    def control_max_tokens(self) -> int:
+        return max(self.control_tokens_list) if self.control_tokens_list else 0
+
+    @property
+    def mintok_p50_tokens(self) -> float:
+        return _percentile(self.mintok_tokens_list, 0.50)
+
+    @property
+    def mintok_p95_tokens(self) -> float:
+        return _percentile(self.mintok_tokens_list, 0.95)
+
+    @property
+    def mintok_max_tokens(self) -> int:
+        return max(self.mintok_tokens_list) if self.mintok_tokens_list else 0
+
 
 def evaluate_paired_public_runs(
     control_runs: list[PublicRunRecord],
@@ -250,6 +337,9 @@ def evaluate_paired_public_runs(
 
     ctrl_solved_tot = mintok_solved_tot = 0
     ctrl_tok_tot = mintok_tok_tot = 0
+    ctrl_cost_tot = mintok_cost_tot = 0.0
+    ctrl_tok_list: list[int] = []
+    mintok_tok_list: list[int] = []
 
     for tid in all_ids:
         c = ctrl_by_id.get(tid)
@@ -258,6 +348,15 @@ def evaluate_paired_public_runs(
         m_ok = m.solved if m else False
         c_tok = c.provider_tokens if c else 0
         m_tok = m.provider_tokens if m else 0
+        c_cost = c.cost_usd if c else 0.0
+        m_cost = m.cost_usd if m else 0.0
+
+        if c:
+            ctrl_tok_list.append(c_tok)
+            ctrl_cost_tot += c_cost
+        if m:
+            mintok_tok_list.append(m_tok)
+            mintok_cost_tot += m_cost
 
         if c_ok:
             ctrl_solved_tot += 1
@@ -300,4 +399,8 @@ def evaluate_paired_public_runs(
         both_fail=both_fail,
         both_solved_ratios=both_solved_ratios,
         stratification=strat,
+        control_tokens_list=ctrl_tok_list,
+        mintok_tokens_list=mintok_tok_list,
+        control_cost_usd=ctrl_cost_tot,
+        mintok_cost_usd=mintok_cost_tot,
     )
