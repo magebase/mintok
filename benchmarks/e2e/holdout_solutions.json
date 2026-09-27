@@ -1,0 +1,162 @@
+{
+ "ledger-holdout-01": [
+  "return text.strip(' ')",
+  "return text.strip(' \\t\\n-_.')"
+ ],
+ "ledger-holdout-02": [
+  "return amount > threshold",
+  "return amount >= threshold"
+ ],
+ "ledger-holdout-03": [
+  "return min(value, upper_wrong)",
+  "return min(value, upper_right)"
+ ],
+ "ledger-holdout-04": [
+  "return total // count",
+  "return (total + count - 1) // count"
+ ],
+ "ledger-holdout-05": [
+  "if needle in text:",
+  "if needle.lower() in text.lower():"
+ ],
+ "ledger-holdout-06": [
+  "def reindex_voucher(items: list, start: int = 1) -> dict:",
+  "def reindex_voucher(items: list, start: int = 0) -> dict:"
+ ],
+ "ledger-holdout-07": [
+  "return values[:-1]",
+  "return values"
+ ],
+ "ledger-holdout-08": [
+  "return separator.join(parts) + separator",
+  "return separator.join(parts)"
+ ],
+ "ledger-holdout-09": [
+  "return text.count(ch)",
+  "return text.lower().count(ch.lower())"
+ ],
+ "ledger-holdout-10": [
+  "return text.strip()",
+  "return \" \".join(text.split())"
+ ],
+ "inventory-holdout-01": [
+  "return text.strip(' ')",
+  "return text.strip(' \\t\\n-_.')"
+ ],
+ "inventory-holdout-02": [
+  "return amount > threshold",
+  "return amount >= threshold"
+ ],
+ "inventory-holdout-03": [
+  "return min(value, upper_wrong)",
+  "return min(value, upper_right)"
+ ],
+ "inventory-holdout-04": [
+  "return total // count",
+  "return (total + count - 1) // count"
+ ],
+ "inventory-holdout-05": [
+  "if needle in text:",
+  "if needle.lower() in text.lower():"
+ ],
+ "inventory-holdout-06": [
+  "def reindex_parcel(items: list, start: int = 1) -> dict:",
+  "def reindex_parcel(items: list, start: int = 0) -> dict:"
+ ],
+ "inventory-holdout-07": [
+  "return values[:-1]",
+  "return values"
+ ],
+ "inventory-holdout-08": [
+  "return separator.join(parts) + separator",
+  "return separator.join(parts)"
+ ],
+ "inventory-holdout-09": [
+  "return text.count(ch)",
+  "return text.lower().count(ch.lower())"
+ ],
+ "inventory-holdout-10": [
+  "return text.strip()",
+  "return \" \".join(text.split())"
+ ],
+ "dispatch-holdout-01": [
+  "return text.strip(' ')",
+  "return text.strip(' \\t\\n-_.')"
+ ],
+ "dispatch-holdout-02": [
+  "return amount > threshold",
+  "return amount >= threshold"
+ ],
+ "dispatch-holdout-03": [
+  "return min(value, upper_wrong)",
+  "return min(value, upper_right)"
+ ],
+ "dispatch-holdout-04": [
+  "return total // count",
+  "return (total + count - 1) // count"
+ ],
+ "dispatch-holdout-05": [
+  "if needle in text:",
+  "if needle.lower() in text.lower():"
+ ],
+ "dispatch-holdout-06": [
+  "def reindex_window(items: list, start: int = 1) -> dict:",
+  "def reindex_window(items: list, start: int = 0) -> dict:"
+ ],
+ "dispatch-holdout-07": [
+  "return values[:-1]",
+  "return values"
+ ],
+ "dispatch-holdout-08": [
+  "return separator.join(parts) + separator",
+  "return separator.join(parts)"
+ ],
+ "dispatch-holdout-09": [
+  "return text.count(ch)",
+  "return text.lower().count(ch.lower())"
+ ],
+ "dispatch-holdout-10": [
+  "return text.strip()",
+  "return \" \".join(text.split())"
+ ],
+ "metrics-holdout-01": [
+  "return text.strip(' ')",
+  "return text.strip(' \\t\\n-_.')"
+ ],
+ "metrics-holdout-02": [
+  "return amount > threshold",
+  "return amount >= threshold"
+ ],
+ "metrics-holdout-03": [
+  "return min(value, upper_wrong)",
+  "return min(value, upper_right)"
+ ],
+ "metrics-holdout-04": [
+  "return total // count",
+  "return (total + count - 1) // count"
+ ],
+ "metrics-holdout-05": [
+  "if needle in text:",
+  "if needle.lower() in text.lower():"
+ ],
+ "metrics-holdout-06": [
+  "def reindex_datum(items: list, start: int = 1) -> dict:",
+  "def reindex_datum(items: list, start: int = 0) -> dict:"
+ ],
+ "metrics-holdout-07": [
+  "return values[:-1]",
+  "return values"
+ ],
+ "metrics-holdout-08": [
+  "return separator.join(parts) + separator",
+  "return separator.join(parts)"
+ ],
+ "metrics-holdout-09": [
+  "return text.count(ch)",
+  "return text.lower().count(ch.lower())"
+ ],
+ "metrics-holdout-10": [
+  "return text.strip()",
+  "return \" \".join(text.split())"
+ ]
+}

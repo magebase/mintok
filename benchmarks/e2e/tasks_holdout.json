@@ -1,0 +1,362 @@
+[
+ {
+  "id": "ledger-holdout-01",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, clip_entry leaves stray tabs, newlines, dashes, underscores or dots on entry text. Make it treat text built only from whitespace, dashes, underscores and dots as fully trimmed.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import clip_entry\nassert clip_entry('  x  ') == 'x'\nassert clip_entry('-_-.x..-_') == 'x'\nassert clip_entry('\\t\\n-.x. -\\n') == 'x'\nok = True\n",
+  "target": "entry",
+  "template": "strip"
+ },
+ {
+  "id": "ledger-holdout-02",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, flags_posting misses posting items that hit the threshold exactly. Reaching the threshold must count as meeting it.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import flags_posting\nassert flags_posting(10, 10) is True\nassert flags_posting(9, 10) is False\nassert flags_posting(11, 10) is True\nok = True\n",
+  "target": "posting",
+  "template": "threshold"
+ },
+ {
+  "id": "ledger-holdout-03",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, cap_amount clamps to the wrong ceiling argument. Clamp to upper_right, not upper_wrong, and leave the rest unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import cap_amount\nassert cap_amount(50, 10, 40) == 40\nassert cap_amount(3, 10, 40) == 3\nok = True\n",
+  "target": "amount",
+  "template": "bound"
+ },
+ {
+  "id": "ledger-holdout-04",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, share_balance truncates instead of rounding half up. A remainder of one or more must round the share up.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import share_balance\nassert share_balance(7, 2) == 4\nassert share_balance(6, 2) == 3\nassert share_balance(5, 2) == 3\nok = True\n",
+  "target": "balance",
+  "template": "round"
+ },
+ {
+  "id": "ledger-holdout-05",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, finds_memo misses matches that differ in letter case. Search must be case-insensitive for memo text.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import finds_memo\nassert finds_memo('Find The Item', 'the') is True\nassert finds_memo('nothing here', 'zzz') is False\nok = True\n",
+  "target": "memo",
+  "template": "case"
+ },
+ {
+  "id": "ledger-holdout-06",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, reindex_voucher numbers voucher items from one; the contract says zero-based. Default the start to zero.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import reindex_voucher\nassert reindex_voucher(['a', 'b'])[0] == 'a'\nassert reindex_voucher(['a'], start=5)[5] == 'a'\nok = True\n",
+  "target": "voucher",
+  "template": "default"
+ },
+ {
+  "id": "ledger-holdout-07",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, keep_ledger mistakenly drops the last value. Return the ledger values unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import keep_ledger\nassert keep_ledger([1, 2, 3]) == [1, 2, 3]\nassert keep_ledger([]) == []\nok = True\n",
+  "target": "ledger",
+  "template": "slice"
+ },
+ {
+  "id": "ledger-holdout-08",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, link_debit appends a stray trailing separator after joining debit parts. Join with exactly one separator between parts and none at the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import link_debit\nassert link_debit(['a', 'b']) == 'a-b'\nassert link_debit(['a']) == 'a'\nassert link_debit([], '-') == ''\nok = True\n",
+  "target": "debit",
+  "template": "join"
+ },
+ {
+  "id": "ledger-holdout-09",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, tally_credit misses marker letters written in other cases. Count them case-insensitively.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import tally_credit\nassert tally_credit('aAa', 'a') == 3\nassert tally_credit('bbb', 'a') == 0\nok = True\n",
+  "target": "credit",
+  "template": "count"
+ },
+ {
+  "id": "ledger-holdout-10",
+  "klass": "large_file_navigation",
+  "repo": "ledger",
+  "instruction": "In src/ledger/large.py, tidy_reconcile leaves runs of inner whitespace alone. Collapse every inner whitespace run to a single space and trim the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom ledger.large import tidy_reconcile\nassert tidy_reconcile('  a   b  ') == 'a b'\nassert tidy_reconcile('a\\tb\\nc') == 'a b c'\nok = True\n",
+  "target": "reconcile",
+  "template": "normalize"
+ },
+ {
+  "id": "inventory-holdout-01",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, clip_stock leaves stray tabs, newlines, dashes, underscores or dots on stock text. Make it treat text built only from whitespace, dashes, underscores and dots as fully trimmed.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import clip_stock\nassert clip_stock('  x  ') == 'x'\nassert clip_stock('-_-.x..-_') == 'x'\nassert clip_stock('\\t\\n-.x. -\\n') == 'x'\nok = True\n",
+  "target": "stock",
+  "template": "strip"
+ },
+ {
+  "id": "inventory-holdout-02",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, flags_sku misses sku items that hit the threshold exactly. Reaching the threshold must count as meeting it.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import flags_sku\nassert flags_sku(10, 10) is True\nassert flags_sku(9, 10) is False\nassert flags_sku(11, 10) is True\nok = True\n",
+  "target": "sku",
+  "template": "threshold"
+ },
+ {
+  "id": "inventory-holdout-03",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, cap_crate clamps to the wrong ceiling argument. Clamp to upper_right, not upper_wrong, and leave the rest unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import cap_crate\nassert cap_crate(50, 10, 40) == 40\nassert cap_crate(3, 10, 40) == 3\nok = True\n",
+  "target": "crate",
+  "template": "bound"
+ },
+ {
+  "id": "inventory-holdout-04",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, share_shelf truncates instead of rounding half up. A remainder of one or more must round the share up.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import share_shelf\nassert share_shelf(7, 2) == 4\nassert share_shelf(6, 2) == 3\nassert share_shelf(5, 2) == 3\nok = True\n",
+  "target": "shelf",
+  "template": "round"
+ },
+ {
+  "id": "inventory-holdout-05",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, finds_pallet misses matches that differ in letter case. Search must be case-insensitive for pallet text.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import finds_pallet\nassert finds_pallet('Find The Item', 'the') is True\nassert finds_pallet('nothing here', 'zzz') is False\nok = True\n",
+  "target": "pallet",
+  "template": "case"
+ },
+ {
+  "id": "inventory-holdout-06",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, reindex_parcel numbers parcel items from one; the contract says zero-based. Default the start to zero.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import reindex_parcel\nassert reindex_parcel(['a', 'b'])[0] == 'a'\nassert reindex_parcel(['a'], start=5)[5] == 'a'\nok = True\n",
+  "target": "parcel",
+  "template": "default"
+ },
+ {
+  "id": "inventory-holdout-07",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, keep_warehouse mistakenly drops the last value. Return the warehouse values unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import keep_warehouse\nassert keep_warehouse([1, 2, 3]) == [1, 2, 3]\nassert keep_warehouse([]) == []\nok = True\n",
+  "target": "warehouse",
+  "template": "slice"
+ },
+ {
+  "id": "inventory-holdout-08",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, link_count appends a stray trailing separator after joining count parts. Join with exactly one separator between parts and none at the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import link_count\nassert link_count(['a', 'b']) == 'a-b'\nassert link_count(['a']) == 'a'\nassert link_count([], '-') == ''\nok = True\n",
+  "target": "count",
+  "template": "join"
+ },
+ {
+  "id": "inventory-holdout-09",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, tally_bin misses marker letters written in other cases. Count them case-insensitively.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import tally_bin\nassert tally_bin('aAa', 'a') == 3\nassert tally_bin('bbb', 'a') == 0\nok = True\n",
+  "target": "bin",
+  "template": "count"
+ },
+ {
+  "id": "inventory-holdout-10",
+  "klass": "large_file_navigation",
+  "repo": "inventory",
+  "instruction": "In src/inventory/large.py, tidy_batch leaves runs of inner whitespace alone. Collapse every inner whitespace run to a single space and trim the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom inventory.large import tidy_batch\nassert tidy_batch('  a   b  ') == 'a b'\nassert tidy_batch('a\\tb\\nc') == 'a b c'\nok = True\n",
+  "target": "batch",
+  "template": "normalize"
+ },
+ {
+  "id": "dispatch-holdout-01",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, clip_route leaves stray tabs, newlines, dashes, underscores or dots on route text. Make it treat text built only from whitespace, dashes, underscores and dots as fully trimmed.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import clip_route\nassert clip_route('  x  ') == 'x'\nassert clip_route('-_-.x..-_') == 'x'\nassert clip_route('\\t\\n-.x. -\\n') == 'x'\nok = True\n",
+  "target": "route",
+  "template": "strip"
+ },
+ {
+  "id": "dispatch-holdout-02",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, flags_courier misses courier items that hit the threshold exactly. Reaching the threshold must count as meeting it.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import flags_courier\nassert flags_courier(10, 10) is True\nassert flags_courier(9, 10) is False\nassert flags_courier(11, 10) is True\nok = True\n",
+  "target": "courier",
+  "template": "threshold"
+ },
+ {
+  "id": "dispatch-holdout-03",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, cap_manifest clamps to the wrong ceiling argument. Clamp to upper_right, not upper_wrong, and leave the rest unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import cap_manifest\nassert cap_manifest(50, 10, 40) == 40\nassert cap_manifest(3, 10, 40) == 3\nok = True\n",
+  "target": "manifest",
+  "template": "bound"
+ },
+ {
+  "id": "dispatch-holdout-04",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, share_stop truncates instead of rounding half up. A remainder of one or more must round the share up.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import share_stop\nassert share_stop(7, 2) == 4\nassert share_stop(6, 2) == 3\nassert share_stop(5, 2) == 3\nok = True\n",
+  "target": "stop",
+  "template": "round"
+ },
+ {
+  "id": "dispatch-holdout-05",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, finds_leg misses matches that differ in letter case. Search must be case-insensitive for leg text.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import finds_leg\nassert finds_leg('Find The Item', 'the') is True\nassert finds_leg('nothing here', 'zzz') is False\nok = True\n",
+  "target": "leg",
+  "template": "case"
+ },
+ {
+  "id": "dispatch-holdout-06",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, reindex_window numbers window items from one; the contract says zero-based. Default the start to zero.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import reindex_window\nassert reindex_window(['a', 'b'])[0] == 'a'\nassert reindex_window(['a'], start=5)[5] == 'a'\nok = True\n",
+  "target": "window",
+  "template": "default"
+ },
+ {
+  "id": "dispatch-holdout-07",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, keep_dispatch mistakenly drops the last value. Return the dispatch values unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import keep_dispatch\nassert keep_dispatch([1, 2, 3]) == [1, 2, 3]\nassert keep_dispatch([]) == []\nok = True\n",
+  "target": "dispatch",
+  "template": "slice"
+ },
+ {
+  "id": "dispatch-holdout-08",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, link_cargo appends a stray trailing separator after joining cargo parts. Join with exactly one separator between parts and none at the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import link_cargo\nassert link_cargo(['a', 'b']) == 'a-b'\nassert link_cargo(['a']) == 'a'\nassert link_cargo([], '-') == ''\nok = True\n",
+  "target": "cargo",
+  "template": "join"
+ },
+ {
+  "id": "dispatch-holdout-09",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, tally_pickup misses marker letters written in other cases. Count them case-insensitively.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import tally_pickup\nassert tally_pickup('aAa', 'a') == 3\nassert tally_pickup('bbb', 'a') == 0\nok = True\n",
+  "target": "pickup",
+  "template": "count"
+ },
+ {
+  "id": "dispatch-holdout-10",
+  "klass": "large_file_navigation",
+  "repo": "dispatch",
+  "instruction": "In src/dispatch/large.py, tidy_depot leaves runs of inner whitespace alone. Collapse every inner whitespace run to a single space and trim the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom dispatch.large import tidy_depot\nassert tidy_depot('  a   b  ') == 'a b'\nassert tidy_depot('a\\tb\\nc') == 'a b c'\nok = True\n",
+  "target": "depot",
+  "template": "normalize"
+ },
+ {
+  "id": "metrics-holdout-01",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, clip_gauge leaves stray tabs, newlines, dashes, underscores or dots on gauge text. Make it treat text built only from whitespace, dashes, underscores and dots as fully trimmed.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import clip_gauge\nassert clip_gauge('  x  ') == 'x'\nassert clip_gauge('-_-.x..-_') == 'x'\nassert clip_gauge('\\t\\n-.x. -\\n') == 'x'\nok = True\n",
+  "target": "gauge",
+  "template": "strip"
+ },
+ {
+  "id": "metrics-holdout-02",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, flags_sample misses sample items that hit the threshold exactly. Reaching the threshold must count as meeting it.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import flags_sample\nassert flags_sample(10, 10) is True\nassert flags_sample(9, 10) is False\nassert flags_sample(11, 10) is True\nok = True\n",
+  "target": "sample",
+  "template": "threshold"
+ },
+ {
+  "id": "metrics-holdout-03",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, cap_bucket clamps to the wrong ceiling argument. Clamp to upper_right, not upper_wrong, and leave the rest unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import cap_bucket\nassert cap_bucket(50, 10, 40) == 40\nassert cap_bucket(3, 10, 40) == 3\nok = True\n",
+  "target": "bucket",
+  "template": "bound"
+ },
+ {
+  "id": "metrics-holdout-04",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, share_series truncates instead of rounding half up. A remainder of one or more must round the share up.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import share_series\nassert share_series(7, 2) == 4\nassert share_series(6, 2) == 3\nassert share_series(5, 2) == 3\nok = True\n",
+  "target": "series",
+  "template": "round"
+ },
+ {
+  "id": "metrics-holdout-05",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, finds_interval misses matches that differ in letter case. Search must be case-insensitive for interval text.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import finds_interval\nassert finds_interval('Find The Item', 'the') is True\nassert finds_interval('nothing here', 'zzz') is False\nok = True\n",
+  "target": "interval",
+  "template": "case"
+ },
+ {
+  "id": "metrics-holdout-06",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, reindex_datum numbers datum items from one; the contract says zero-based. Default the start to zero.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import reindex_datum\nassert reindex_datum(['a', 'b'])[0] == 'a'\nassert reindex_datum(['a'], start=5)[5] == 'a'\nok = True\n",
+  "target": "datum",
+  "template": "default"
+ },
+ {
+  "id": "metrics-holdout-07",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, keep_metric mistakenly drops the last value. Return the metric values unchanged.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import keep_metric\nassert keep_metric([1, 2, 3]) == [1, 2, 3]\nassert keep_metric([]) == []\nok = True\n",
+  "target": "metric",
+  "template": "slice"
+ },
+ {
+  "id": "metrics-holdout-08",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, link_window appends a stray trailing separator after joining window parts. Join with exactly one separator between parts and none at the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import link_window\nassert link_window(['a', 'b']) == 'a-b'\nassert link_window(['a']) == 'a'\nassert link_window([], '-') == ''\nok = True\n",
+  "target": "window",
+  "template": "join"
+ },
+ {
+  "id": "metrics-holdout-09",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, tally_quantile misses marker letters written in other cases. Count them case-insensitively.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import tally_quantile\nassert tally_quantile('aAa', 'a') == 3\nassert tally_quantile('bbb', 'a') == 0\nok = True\n",
+  "target": "quantile",
+  "template": "count"
+ },
+ {
+  "id": "metrics-holdout-10",
+  "klass": "large_file_navigation",
+  "repo": "metrics",
+  "instruction": "In src/metrics/large.py, tidy_burst leaves runs of inner whitespace alone. Collapse every inner whitespace run to a single space and trim the ends.",
+  "check": "import os, sys\nsys.path.insert(0, os.path.join(root, 'src'))\nfrom metrics.large import tidy_burst\nassert tidy_burst('  a   b  ') == 'a b'\nassert tidy_burst('a\\tb\\nc') == 'a b c'\nok = True\n",
+  "target": "burst",
+  "template": "normalize"
+ }
+]

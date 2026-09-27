@@ -66,14 +66,17 @@ FIXTURES = E2E_DIR / "fixtures"
 TASKS_JSON = E2E_DIR / "tasks_generated.json"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GENERATED_TASKS = Path(__file__).resolve().parent / "tasks_generated.json"
+HOLDOUT_TASKS = Path(__file__).resolve().parent / "tasks_holdout.json"
 PROMPT_OVERHEAD_TOKENS = 250  # arm rules + JSON report instructions, identical for both arms
 
 
 def all_tasks() -> list[dict]:
-    """The 30 dev-set tasks plus the generated stratified eval tasks."""
+    """The 30 dev-set tasks plus the generated stratified eval tasks and holdout tasks."""
     tasks = list(TASKS)
     if GENERATED_TASKS.exists():
         tasks += json.loads(GENERATED_TASKS.read_text())
+    if HOLDOUT_TASKS.exists():
+        tasks += json.loads(HOLDOUT_TASKS.read_text())
     return tasks
 
 
@@ -521,8 +524,8 @@ def slice_cmd(task_id: str | None, eval_all: bool) -> None:
           "<=600 strong, <=400 excellent at control's solve rate")
 
 
-def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -> None:
-    """Isolated live test: slicer arm vs control on the same 15 large tasks.
+def promote_large(model: str, mock: bool = False, provider: str = "anthropic", holdout: bool = False) -> None:
+    """Isolated live test: slicer arm vs control on large tasks.
 
     Manifest guard: the frozen control-eval trajectories are reused ONLY
     when their recorded manifest matches the live slicer configuration
@@ -591,7 +594,15 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
             repo_snapshot_hashes=",".join(f"{k}:{v}" for k, v in sorted(repo_hashes.items())),
         )
 
-    tasks = [t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"]
+    if holdout:
+        tasks = json.loads(HOLDOUT_TASKS.read_text())
+        slicer_arm = "slicer-holdout"
+        control_arm_fresh = "control-holdout"
+    else:
+        tasks = [t for t in json.loads(TASKS_JSON.read_text()) if t["klass"] == "large_file_navigation"]
+        slicer_arm = "slicer-large"
+        control_arm_fresh = "control-large"
+
     scratch = Path("/home/aqua/bench-run")
     scratch.mkdir(parents=True, exist_ok=True)
 
@@ -604,29 +615,29 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
             return set()
         return {json.loads(l)["task_id"] for l in path.read_text().splitlines() if l.strip()}
 
-    done_slicer = recorded_tasks("slicer-large")
-    done_control = recorded_tasks("control-large")
+    done_slicer = recorded_tasks(slicer_arm)
+    done_control = recorded_tasks(control_arm_fresh)
 
-    frozen_path = RUNS_DIR / "control-eval.manifest.json"
+    frozen_path = (RUNS_DIR / f"{control_arm_fresh}.manifest.json") if holdout else (RUNS_DIR / "control-eval.manifest.json")
     frozen = RunManifest.from_json(frozen_path.read_text()) if frozen_path.exists() else None
     live_manifest = arm_manifest("S")
     compatible, reasons = manifests_compatible(frozen, live_manifest)
     if compatible:
-        control_arm = "control-eval"
-        print("manifest guard: frozen control-eval matches live config; reusing control trajectories")
+        control_arm = control_arm_fresh if holdout else "control-eval"
+        print(f"manifest guard: frozen {control_arm} matches live config; reusing control trajectories")
     else:
-        control_arm = "control-large"
-        print("manifest guard: frozen control NOT reusable ->")
+        control_arm = control_arm_fresh
+        print(f"manifest guard: frozen control NOT reusable ->")
         for reason in reasons:
             print(f"  - {reason}")
-        print("running 15 fresh control trajectories in this session (worth the spend)")
+        print(f"running {len(tasks)} fresh control trajectories in this session (worth the spend)")
 
     runs: list[SlicerRun] = []
     control_rows: dict[str, dict] = {}
     for task in tasks:
         task_id = task["id"]
-        copy = scratch / "copies" / f"{task_id}-slicer"
-        log = scratch / "logs" / f"{task_id}-slicer.jsonl"
+        copy = scratch / "copies" / f"{task_id}-{slicer_arm}"
+        log = scratch / "logs" / f"{task_id}-{slicer_arm}.jsonl"
         if task_id in done_slicer:
             print(f"resume: {task_id} slicer already recorded; using durable record")
         else:
@@ -682,20 +693,20 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
         )
         if not mock:
             if task_id not in done_slicer:
-                record("slicer-large", task_id, log)
+                record(slicer_arm, task_id, log)
         usage_path = log.parent / f"{log.stem}.usage.json"
         usd = json.loads(usage_path.read_text())["usd"] if usage_path.exists() else 0.0
         note = f" failure={klass}" if not score["solved"] else ""
         print(f"{task_id}: solved={score['solved']} tokens={runs[-1].tokens} turns={runs[-1].turns} "
               f"slice={slice_tok} fallback={fallback_tok} usd={usd:.4f}{note}")
 
-        if control_arm == "control-large":
+        if control_arm == control_arm_fresh:
             if task_id in done_control:
                 print(f"resume: {task_id} control already recorded; using durable record")
             else:
-                ccopy = scratch / "copies" / f"{task_id}-control"
+                ccopy = scratch / "copies" / f"{task_id}-{control_arm_fresh}"
                 prepare(ccopy, task_id)
-                clog = scratch / "logs" / f"{task_id}-control-large.jsonl"
+                clog = scratch / "logs" / f"{task_id}-{control_arm_fresh}.jsonl"
                 clog.unlink(missing_ok=True)
                 run_loop(
                     ccopy, clog, "control", task["instruction"], model,
@@ -706,9 +717,9 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
                 if not mock:
                     record(control_arm, task_id, clog)
             cscore = json.loads(
-                (scratch / "logs" / f"{task_id}-control-large.score.json").read_text()
+                (scratch / "logs" / f"{task_id}-{control_arm_fresh}.score.json").read_text()
             )
-            cusage_path = scratch / "logs" / f"{task_id}-control-large.usage.json"
+            cusage_path = scratch / "logs" / f"{task_id}-{control_arm_fresh}.usage.json"
             control_rows[task_id] = {
                 "solved": cscore["solved"],
                 "input_tokens": cscore["tool_output_tokens"] + prompt_tokens,
@@ -723,13 +734,14 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
             if l.strip()
         }
 
-    RUNS_DIR.mkdir(exist_ok=True)
-    (RUNS_DIR / "slicer-large.manifest.json").write_text(live_manifest.to_json())
-    if control_arm == "control-large" and not mock:
-        (RUNS_DIR / f"{control_arm}.manifest.json").write_text(arm_manifest("control").to_json())
+    if not mock:
+        RUNS_DIR.mkdir(exist_ok=True)
+        (RUNS_DIR / f"{slicer_arm}.manifest.json").write_text(live_manifest.to_json())
+        if control_arm == control_arm_fresh:
+            (RUNS_DIR / f"{control_arm}.manifest.json").write_text(arm_manifest("control").to_json())
 
     rep = slicer_promotion(runs, solve_target=len(tasks))
-    ctrl_solved = sum(control_rows[r.task_id]["solved"] for r in runs)
+    ctrl_solved = sum(control_rows[r.task_id]["solved"] for r in runs if r.task_id in control_rows)
 
     def usage_rows(prefix: str) -> list[dict]:
         rows = []
@@ -738,10 +750,8 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
             rows.append(json.loads(upath.read_text()) if upath.exists() else {})
         return rows
 
-    slicer_usage = usage_rows("slicer")
-    # control-large logs are stemmed f"{tid}-control-large"; a bare
-    # "control" suffix found nothing and every control row rendered "—".
-    control_usage = usage_rows("control-large") if control_arm == "control-large" else []
+    slicer_usage = usage_rows(slicer_arm)
+    control_usage = usage_rows(control_arm_fresh) if control_arm == control_arm_fresh else []
 
     def tok_sum(rows: list[dict], key: str) -> int:
         return sum(u.get(key, 0) for u in rows)
@@ -825,8 +835,26 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic") -
         c_n9 = max(1, math.ceil(0.95 * len(control_usd_per_task))) - 1 if control_usd_per_task else 0
         row("p95 $/task", control_usd_per_task[c_n9] if control_usage else None, slicer_usd_per_task[n9])
         row("max $/task", max(control_usd_per_task) if control_usage else None, max(slicer_usd_per_task))
-    print(f"  VERDICT: {rep.verdict.upper()} (bar: solve >= {len(tasks)}/15, "
+    print(f"  VERDICT: {rep.verdict.upper()} (bar: solve >= {len(tasks)}/{len(tasks)}, "
           f"<=800 promote / <=600 strong / <=400 excellent)")
+    if holdout:
+        solve_drop_pp = (ctrl_solved - rep.solved) / len(tasks)
+        correctness_pass = solve_drop_pp <= 0.05
+        if slicer_ptok_solved and rep.solved and control_ptok_solved and ctrl_solved:
+            s_pts = slicer_ptok_solved / rep.solved
+            c_pts = control_ptok_solved / ctrl_solved
+            ratio_val = c_pts / s_pts if s_pts else 0.0
+            if not correctness_pass:
+                h_verdict = f"REJECT (solve rate drop {solve_drop_pp * 100:.1f}pp > 5pp guard)"
+            elif ratio_val >= 4.0:
+                h_verdict = f"EXCELLENT ({ratio_val:.2f}x provider tok/solved >= 4.0x)"
+            elif ratio_val >= 3.0:
+                h_verdict = f"STRONG ({ratio_val:.2f}x provider tok/solved >= 3.0x)"
+            elif ratio_val >= 2.0:
+                h_verdict = f"PASS ({ratio_val:.2f}x provider tok/solved >= 2.0x)"
+            else:
+                h_verdict = f"REJECT ({ratio_val:.2f}x provider tok/solved < 2.0x threshold)"
+            print(f"  HOLDOUT GATES: {h_verdict}")
 
 
 def main() -> None:
@@ -877,6 +905,7 @@ def main() -> None:
     prm.add_argument("--model", required=True, help="exact model snapshot id; never a random router slug")
     prm.add_argument("--provider", default="anthropic", choices=["anthropic", "openrouter"])
     prm.add_argument("--mock", action="store_true", help="scripted fake model; plumbing only")
+    prm.add_argument("--holdout", action="store_true", help="run on fresh 40-task holdout set instead of 15-task dev set")
 
     args = parser.parse_args()
     if args.cmd == "prepare":
@@ -905,7 +934,7 @@ def main() -> None:
                 "refusing to run: --model must be one specific model slug, never a "
                 "random router slug — same-model control requires a fixed upstream"
             )
-        promote_large(args.model, mock=args.mock, provider=args.provider)
+        promote_large(args.model, mock=args.mock, provider=args.provider, holdout=args.holdout)
     else:
         report()
 

@@ -1,0 +1,242 @@
+{
+ "ledger-holdout-01": {
+  "task_id": "ledger-holdout-01",
+  "prompt_hash": "9bbea8bd51ead4077d38c2c92a7b3ecc",
+  "checker_hash": "7652ecabc87ffdd94f44a00b292bdecd",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-02": {
+  "task_id": "ledger-holdout-02",
+  "prompt_hash": "c9fca61f079a9e05186cfada0193be5a",
+  "checker_hash": "30de2f7de12dfd544f21fa32bfbd3318",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-03": {
+  "task_id": "ledger-holdout-03",
+  "prompt_hash": "dbc750165e8bd85d643ae028288a166d",
+  "checker_hash": "5ee5941425f2b4579b38a0e38c3d572e",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-04": {
+  "task_id": "ledger-holdout-04",
+  "prompt_hash": "0ab4b73c11030f729ff436cd9b4b0967",
+  "checker_hash": "d462c6f5115cb16c941ee7a196edd50f",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-05": {
+  "task_id": "ledger-holdout-05",
+  "prompt_hash": "7c6f2f4e5b766ba291dbfdd7a196aa57",
+  "checker_hash": "1d06b8984e946e137b4615545dd90c90",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-06": {
+  "task_id": "ledger-holdout-06",
+  "prompt_hash": "4ca15fba324ada17e9759eded16cd12a",
+  "checker_hash": "02aa9e7c823aafe316df5c28d590c44d",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-07": {
+  "task_id": "ledger-holdout-07",
+  "prompt_hash": "f7ac72058295bd35efdb19f5b48ae11c",
+  "checker_hash": "41aee59087a9b2422fdeadd6204a3175",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-08": {
+  "task_id": "ledger-holdout-08",
+  "prompt_hash": "5d4f2c4746b1ff7e467ad8f2615bb3eb",
+  "checker_hash": "92117efecd63a7ca03060a0ca2b8132b",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-09": {
+  "task_id": "ledger-holdout-09",
+  "prompt_hash": "a90e3d6f0dd7cc62a958425eddeb8563",
+  "checker_hash": "cb227990e067dd71055396d8bb61f42f",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "ledger-holdout-10": {
+  "task_id": "ledger-holdout-10",
+  "prompt_hash": "7f6541e4feed4eb94008a7099c912caf",
+  "checker_hash": "48a427a1ffcc813eddaaf037f509ec41",
+  "fixture_hash": "d42e0e0c784f69b2682f96987d355a61"
+ },
+ "inventory-holdout-01": {
+  "task_id": "inventory-holdout-01",
+  "prompt_hash": "c40940e17de048bd2a8ee701f73afeb3",
+  "checker_hash": "bb7300cceea5bb5c2412ec6d434192b7",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-02": {
+  "task_id": "inventory-holdout-02",
+  "prompt_hash": "2395127638fa5ae23a0a7887cb53ceed",
+  "checker_hash": "dbceecffe6748a90747671a29f1a0d37",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-03": {
+  "task_id": "inventory-holdout-03",
+  "prompt_hash": "a89711a57170a148399f1958c92513cb",
+  "checker_hash": "b327df7ff136f66fcbbb4fcb0be31c28",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-04": {
+  "task_id": "inventory-holdout-04",
+  "prompt_hash": "f8717286fd6f04931f7f4dfc2f62d346",
+  "checker_hash": "6234a9c6f92b923414da8307b50f3250",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-05": {
+  "task_id": "inventory-holdout-05",
+  "prompt_hash": "6d46d84e3d4826acb27befc98716c746",
+  "checker_hash": "7f258f1cd340e3004b8912d50f700fed",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-06": {
+  "task_id": "inventory-holdout-06",
+  "prompt_hash": "6d8388135f04c277c20b4589ebb32902",
+  "checker_hash": "3001851502517ca97cf951a8d40addce",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-07": {
+  "task_id": "inventory-holdout-07",
+  "prompt_hash": "5b11f2cf61a48c36dfa251613c4df841",
+  "checker_hash": "39ebd2b23420fb29aa13c5ded9cc0b92",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-08": {
+  "task_id": "inventory-holdout-08",
+  "prompt_hash": "9bb61209cb0091939d02f3cae969345a",
+  "checker_hash": "58a4996e25fc213000d8839c9fa78fb0",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-09": {
+  "task_id": "inventory-holdout-09",
+  "prompt_hash": "ff189f95a25c1f5afd61bfbd20733da4",
+  "checker_hash": "2e44e6998abe735bc35d51a1a2d916b0",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "inventory-holdout-10": {
+  "task_id": "inventory-holdout-10",
+  "prompt_hash": "fbc3b3379f9fc58a4896a1f3699b9c48",
+  "checker_hash": "fab03e840723804ff91fd017948ea8f2",
+  "fixture_hash": "fd324046680940ef01e41f0f0885771a"
+ },
+ "dispatch-holdout-01": {
+  "task_id": "dispatch-holdout-01",
+  "prompt_hash": "7fa1abf51d6ce3e59b22e8fa4c9aad81",
+  "checker_hash": "de3e5f1f14b8276f06f3807ae051b294",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-02": {
+  "task_id": "dispatch-holdout-02",
+  "prompt_hash": "64fa1329d3882a8329c42664bea98307",
+  "checker_hash": "9fb178373f97d771888c3f196547c553",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-03": {
+  "task_id": "dispatch-holdout-03",
+  "prompt_hash": "2cac1c56c4244a6ecb093aa1a7a2919f",
+  "checker_hash": "2feb09692313551c0c797b8320bef6de",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-04": {
+  "task_id": "dispatch-holdout-04",
+  "prompt_hash": "63887d8dd4ef62f2c90c87e74e1e9070",
+  "checker_hash": "2fc8f1fa78902ccf619a61a4f6baac4c",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-05": {
+  "task_id": "dispatch-holdout-05",
+  "prompt_hash": "9bda13fd28c83f02a987d8ebb08f2aaa",
+  "checker_hash": "e43767376dab88b643e93a4f74e19247",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-06": {
+  "task_id": "dispatch-holdout-06",
+  "prompt_hash": "7483829eebc59701dc6d7b66461afdd6",
+  "checker_hash": "6ebf27dfdcb1c6db3e3ed844f961a966",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-07": {
+  "task_id": "dispatch-holdout-07",
+  "prompt_hash": "a1fc089fa1fc60704da4cc128e5bf3e5",
+  "checker_hash": "18bb69fdde547f6716c3e4a7b75eef07",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-08": {
+  "task_id": "dispatch-holdout-08",
+  "prompt_hash": "67a8f6aec2784318dec4df6c805b6aa0",
+  "checker_hash": "1c5f64d3c02d1f21577f8625257d21fe",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-09": {
+  "task_id": "dispatch-holdout-09",
+  "prompt_hash": "fa0d95794464860f5ecc3e2664bea455",
+  "checker_hash": "9873cb03e8dfceecac5c1dfd022e8073",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "dispatch-holdout-10": {
+  "task_id": "dispatch-holdout-10",
+  "prompt_hash": "4b81cf76ab239b2a1996d39c5f2bf4e3",
+  "checker_hash": "48ab1af0336e3924e60d7cf1cc2e0099",
+  "fixture_hash": "e2c97601513af3cf6d88919ccc898f59"
+ },
+ "metrics-holdout-01": {
+  "task_id": "metrics-holdout-01",
+  "prompt_hash": "226f7eea64315e7786a466c459b81997",
+  "checker_hash": "fe723d9adcd12eb646f5bb52a33e1adc",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-02": {
+  "task_id": "metrics-holdout-02",
+  "prompt_hash": "3544af31f74fa802c7eff3b90a1991f0",
+  "checker_hash": "61fd72dea82b0279a7a97773b8b74101",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-03": {
+  "task_id": "metrics-holdout-03",
+  "prompt_hash": "34b544425dd5993ab6711a53c74240a3",
+  "checker_hash": "c6848ce4d6a7ade0973e3ca56d2c7365",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-04": {
+  "task_id": "metrics-holdout-04",
+  "prompt_hash": "463cc4e5e690391101e323dd5e7104a7",
+  "checker_hash": "10df56c0e82a5149d4c915d084b97fcf",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-05": {
+  "task_id": "metrics-holdout-05",
+  "prompt_hash": "120785da70dd995690d61d87c9207c35",
+  "checker_hash": "58cb9010c2f6892334b2b01eed7112a8",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-06": {
+  "task_id": "metrics-holdout-06",
+  "prompt_hash": "adf297f8345b1c4111b270fa925a2cdb",
+  "checker_hash": "9cd3536fd8f34dcf07678e0015a0ca15",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-07": {
+  "task_id": "metrics-holdout-07",
+  "prompt_hash": "a91120e94b0615d6d397981eb2c4836c",
+  "checker_hash": "133f6fb17bc79f0d20dd35250a025275",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-08": {
+  "task_id": "metrics-holdout-08",
+  "prompt_hash": "0a8433e6890b22044bb9ee9119f2f1e7",
+  "checker_hash": "fd8d27aed641e1f8f250518ba69b6ef1",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-09": {
+  "task_id": "metrics-holdout-09",
+  "prompt_hash": "c36334f8402846c6f152f6c966199f50",
+  "checker_hash": "96306e6bd7990c6f9973152390bdcd06",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ },
+ "metrics-holdout-10": {
+  "task_id": "metrics-holdout-10",
+  "prompt_hash": "fdeebfbf9e821e374f5e0198dbbfbc08",
+  "checker_hash": "77522ee0570292f4d0e3a6c5eb47ae55",
+  "fixture_hash": "2a8347fec489185c9f534bf21f548cc0"
+ }
+}
