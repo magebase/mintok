@@ -530,3 +530,30 @@ def no_forced_verification(ctx: SimpleNamespace) -> None:
     entries = [jsonlib.loads(l) for l in ctx.log.read_text().splitlines() if l.strip()]
     model_suites = sum(1 for e in entries if e["tool"] == "suite")
     assert model_suites == 2, [e["tool"] for e in entries]  # exactly the model's own
+
+
+@when("the holdout task suite is verified against its frozen fingerprints")
+def verify_holdout_suite(ctx: SimpleNamespace) -> None:
+    import json as jsonlib
+
+    bench_dir = Path(__file__).resolve().parents[2] / "benchmarks" / "e2e"
+    tasks_path = bench_dir / "tasks_holdout.json"
+    fp_path = bench_dir / "holdout_fingerprints.json"
+    fixtures_dir = bench_dir / "fixtures"
+
+    tasks = jsonlib.loads(tasks_path.read_text())
+    fingerprints = jsonlib.loads(fp_path.read_text())
+
+    ctx.verified_holdout = []
+    for t in tasks:
+        tid = t["id"]
+        fp = fingerprints[tid]
+        repo_dir = fixtures_dir / t["repo"]
+        verify_fingerprint(t, fp, repo_dir)
+        ctx.verified_holdout.append(tid)
+
+
+@then("all 40 holdout tasks pass integrity verification")
+def all_40_pass(ctx: SimpleNamespace) -> None:
+    assert len(ctx.verified_holdout) == 40
+

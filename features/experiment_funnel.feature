@@ -157,3 +157,8 @@ Feature: Experiment funnel
       | yes    | yes       | no        | 3       | no    | edit_tool_limitation  |
       | yes    | yes       | no        | 0       | yes   | checker_disagreement  |
       | yes    | yes       | no        | 0       | no    | agent_reasoning_failure |
+
+  Scenario: The frozen holdout benchmark suite passes static fingerprint integrity
+    When the holdout task suite is verified against its frozen fingerprints
+    Then all 40 holdout tasks pass integrity verification
+
