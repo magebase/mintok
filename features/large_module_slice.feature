@@ -303,3 +303,17 @@ Feature: Large-module slice backend
     And an instruction "parse_options must reject empty opts"
     When the task is sliced
     Then every non-excerpt line is a section label or a region
+
+  Scenario: Slicer ranking has zero dependence on reference solutions or patches
+    Given a repository with files:
+      """
+      # file: src/big.py
+      def parse_options(opts):
+          return opts
+      def validate_options(opts):
+          return bool(opts)
+      """
+    And an instruction "parse_options must reject empty opts"
+    When the task is sliced
+    Then the slice ranking is independent of external solutions or reference fixes
+

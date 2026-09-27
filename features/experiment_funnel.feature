@@ -162,3 +162,10 @@ Feature: Experiment funnel
     When the holdout task suite is verified against its frozen fingerprints
     Then all 40 holdout tasks pass integrity verification
 
+  Scenario: Benchmark workspace copies isolate solutions and checkers from the agent
+    Given a holdout task prepared for benchmark execution
+    When the workspace directory is inspected
+    Then no solution files exist in the workspace
+    And no checker source exists in the workspace
+
+

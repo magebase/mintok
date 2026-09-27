@@ -557,3 +557,38 @@ def verify_holdout_suite(ctx: SimpleNamespace) -> None:
 def all_40_pass(ctx: SimpleNamespace) -> None:
     assert len(ctx.verified_holdout) == 40
 
+
+@given("a holdout task prepared for benchmark execution")
+def prepare_holdout_task(ctx: SimpleNamespace, tmp_path: Path) -> None:
+    import shutil
+
+    bench_dir = Path(__file__).resolve().parents[2] / "benchmarks" / "e2e"
+    fixtures_dir = bench_dir / "fixtures"
+    dest = tmp_path / "workspace"
+    src = fixtures_dir / "ledger"
+    shutil.copytree(src, dest)
+    ctx.workspace = dest
+
+
+@when("the workspace directory is inspected")
+def inspect_workspace(ctx: SimpleNamespace) -> None:
+    pass
+
+
+@then("no solution files exist in the workspace")
+def no_solutions(ctx: SimpleNamespace) -> None:
+    forbidden = ["holdout_solutions.json", "tasks_holdout.json", "holdout_fingerprints.json"]
+    for name in forbidden:
+        assert not (ctx.workspace / name).exists()
+        assert not any(ctx.workspace.rglob(name))
+
+
+@then("no checker source exists in the workspace")
+def no_checkers(ctx: SimpleNamespace) -> None:
+    for py_file in ctx.workspace.rglob("*.py"):
+        content = py_file.read_text()
+        assert "assert clip_" not in content
+        assert "assert flags_" not in content
+        assert "assert cap_" not in content
+
+

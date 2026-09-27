@@ -106,7 +106,14 @@ def prepare(dest: Path, task_id: str | None = None) -> None:
         )
         if reflink.returncode != 0:
             shutil.copytree(source, dest, dirs_exist_ok=True)
+    # Automated Isolation Assertion: agent-visible filesystem must not contain
+    # solution files, reference fixes, checker internals, or holdout metadata.
+    forbidden = ["holdout_solutions.json", "tasks_holdout.json", "holdout_fingerprints.json"]
+    for name in forbidden:
+        assert not (dest / name).exists(), f"Isolation breach: {name} found in workspace {dest}"
+        assert not any(dest.rglob(name)), f"Isolation breach: {name} found nested in workspace {dest}"
     print(dest)
+
 
 
 def check_task(root: Path, task_id: str, checker_src: str, log: Path) -> dict:
@@ -636,96 +643,106 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic", h
     control_rows: dict[str, dict] = {}
     for task in tasks:
         task_id = task["id"]
-        copy = scratch / "copies" / f"{task_id}-{slicer_arm}"
-        log = scratch / "logs" / f"{task_id}-{slicer_arm}.jsonl"
-        if task_id in done_slicer:
-            print(f"resume: {task_id} slicer already recorded; using durable record")
-        else:
-            prepare(copy, task_id)
-            log.unlink(missing_ok=True)
-            run_loop(
-                copy, log, "S", task["instruction"], model,
-                completion=fake_completion if mock else None,
-                provider=provider,
-            )
-        check(copy, task_id, log)
+        # Paired execution interleaving:
+        # Determine randomized arm order per task using a deterministic hash seed
+        # to ensure reproducibility while balancing execution order across the 80 runs.
+        seed_byte = hashlib.sha256(f"{task_id}:{model}:arm_order".encode()).digest()[0]
+        arm_order = ["control", "slicer"] if (seed_byte % 2 == 1) else ["slicer", "control"]
 
-        entries = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
-        slice_entries = [e for e in entries if e.get("tool") == "slice"]
-        slice_tok = sum(estimate_tokens(e.get("output", "")) for e in slice_entries)
-        fallback_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "read")
-        edit_rejections = sum(
-            1 for e in entries if e.get("tool") == "patch" and str(e.get("output", "")).startswith("rejected")
-        )
-        slice_spans = []
-        for e in slice_entries:
-            slice_spans += re.findall(r"([\w./-]+\.py):(\d+)-(\d+)", e.get("output", ""))
-        accepted_patches = [
-            (e["args"]["file"], e["args"]["start"], e["args"]["end"])
-            for e in entries
-            if e.get("tool") == "patch" and str(e.get("output", "")).startswith("patched")
-        ]
-        target_in_slice = any(
-            any(p == f and int(s) <= a and int(t) >= b for p, s, t in slice_spans)
-            for f, a, b in accepted_patches
-        )
-        score = json.loads((log.parent / f"{log.stem}.score.json").read_text())
-        prompt_tokens = estimate_tokens(task["instruction"]) + PROMPT_OVERHEAD_TOKENS
-        flags = dict(
-            solved=score["solved"],
-            target_in_slice=target_in_slice,
-            slice_dominated=slice_tok >= fallback_tok,
-            slice_truncated=any(e.get("expanded") for e in slice_entries),
-            edit_rejections=edit_rejections,
-            suite_ok=score["suite_ok"],
-        )
-        klass = attribute_failure(**flags)
-        runs.append(
-            SlicerRun(
-                task_id=task_id,
-                solved=score["solved"],
-                tokens=score["tool_output_tokens"] + prompt_tokens,
-                turns=score["turns"],
-                slice_tokens=slice_tok,
-                fallback_tokens=fallback_tok,
-                expanded=flags["slice_truncated"],
-            )
-        )
-        if not mock:
-            if task_id not in done_slicer:
-                record(slicer_arm, task_id, log)
-        usage_path = log.parent / f"{log.stem}.usage.json"
-        usd = json.loads(usage_path.read_text())["usd"] if usage_path.exists() else 0.0
-        note = f" failure={klass}" if not score["solved"] else ""
-        print(f"{task_id}: solved={score['solved']} tokens={runs[-1].tokens} turns={runs[-1].turns} "
-              f"slice={slice_tok} fallback={fallback_tok} usd={usd:.4f}{note}")
+        for arm_to_run in arm_order:
+            if arm_to_run == "slicer":
+                copy = scratch / "copies" / f"{task_id}-{slicer_arm}"
+                log = scratch / "logs" / f"{task_id}-{slicer_arm}.jsonl"
+                if task_id in done_slicer:
+                    print(f"resume: {task_id} slicer already recorded; using durable record")
+                else:
+                    prepare(copy, task_id)
+                    log.unlink(missing_ok=True)
+                    run_loop(
+                        copy, log, "S", task["instruction"], model,
+                        completion=fake_completion if mock else None,
+                        provider=provider,
+                    )
+                check(copy, task_id, log)
 
-        if control_arm == control_arm_fresh:
-            if task_id in done_control:
-                print(f"resume: {task_id} control already recorded; using durable record")
-            else:
-                ccopy = scratch / "copies" / f"{task_id}-{control_arm_fresh}"
-                prepare(ccopy, task_id)
-                clog = scratch / "logs" / f"{task_id}-{control_arm_fresh}.jsonl"
-                clog.unlink(missing_ok=True)
-                run_loop(
-                    ccopy, clog, "control", task["instruction"], model,
-                    completion=fake_completion if mock else None,
-                    provider=provider,
+                entries = [json.loads(l) for l in log.read_text().splitlines() if l.strip()]
+                slice_entries = [e for e in entries if e.get("tool") == "slice"]
+                slice_tok = sum(estimate_tokens(e.get("output", "")) for e in slice_entries)
+                fallback_tok = sum(estimate_tokens(e.get("output", "")) for e in entries if e.get("tool") == "read")
+                edit_rejections = sum(
+                    1 for e in entries if e.get("tool") == "patch" and str(e.get("output", "")).startswith("rejected")
                 )
-                check(ccopy, task_id, clog)
+                slice_spans = []
+                for e in slice_entries:
+                    slice_spans += re.findall(r"([\w./-]+\.py):(\d+)-(\d+)", e.get("output", ""))
+                accepted_patches = [
+                    (e["args"]["file"], e["args"]["start"], e["args"]["end"])
+                    for e in entries
+                    if e.get("tool") == "patch" and str(e.get("output", "")).startswith("patched")
+                ]
+                target_in_slice = any(
+                    any(p == f and int(s) <= a and int(t) >= b for p, s, t in slice_spans)
+                    for f, a, b in accepted_patches
+                )
+                score = json.loads((log.parent / f"{log.stem}.score.json").read_text())
+                prompt_tokens = estimate_tokens(task["instruction"]) + PROMPT_OVERHEAD_TOKENS
+                flags = dict(
+                    solved=score["solved"],
+                    target_in_slice=target_in_slice,
+                    slice_dominated=slice_tok >= fallback_tok,
+                    slice_truncated=any(e.get("expanded") for e in slice_entries),
+                    edit_rejections=edit_rejections,
+                    suite_ok=score["suite_ok"],
+                )
+                klass = attribute_failure(**flags)
+                runs.append(
+                    SlicerRun(
+                        task_id=task_id,
+                        solved=score["solved"],
+                        tokens=score["tool_output_tokens"] + prompt_tokens,
+                        turns=score["turns"],
+                        slice_tokens=slice_tok,
+                        fallback_tokens=fallback_tok,
+                        expanded=flags["slice_truncated"],
+                    )
+                )
                 if not mock:
-                    record(control_arm, task_id, clog)
-            cscore = json.loads(
-                (scratch / "logs" / f"{task_id}-{control_arm_fresh}.score.json").read_text()
-            )
-            cusage_path = scratch / "logs" / f"{task_id}-{control_arm_fresh}.usage.json"
-            control_rows[task_id] = {
-                "solved": cscore["solved"],
-                "input_tokens": cscore["tool_output_tokens"] + prompt_tokens,
-                "turns": cscore["turns"],
-                "frontier_usd": json.loads(cusage_path.read_text())["usd"] if cusage_path.exists() else 0.0,
-            }
+                    if task_id not in done_slicer:
+                        record(slicer_arm, task_id, log)
+                usage_path = log.parent / f"{log.stem}.usage.json"
+                usd = json.loads(usage_path.read_text())["usd"] if usage_path.exists() else 0.0
+                note = f" failure={klass}" if not score["solved"] else ""
+                print(f"{task_id}: solved={score['solved']} tokens={runs[-1].tokens} turns={runs[-1].turns} "
+                      f"slice={slice_tok} fallback={fallback_tok} usd={usd:.4f}{note}")
+
+            elif arm_to_run == "control" and control_arm == control_arm_fresh:
+                if task_id in done_control:
+                    print(f"resume: {task_id} control already recorded; using durable record")
+                else:
+                    ccopy = scratch / "copies" / f"{task_id}-{control_arm_fresh}"
+                    prepare(ccopy, task_id)
+                    clog = scratch / "logs" / f"{task_id}-{control_arm_fresh}.jsonl"
+                    clog.unlink(missing_ok=True)
+                    run_loop(
+                        ccopy, clog, "control", task["instruction"], model,
+                        completion=fake_completion if mock else None,
+                        provider=provider,
+                    )
+                    check(ccopy, task_id, clog)
+                    if not mock:
+                        record(control_arm, task_id, clog)
+                cscore = json.loads(
+                    (scratch / "logs" / f"{task_id}-{control_arm_fresh}.score.json").read_text()
+                )
+                cusage_path = scratch / "logs" / f"{task_id}-{control_arm_fresh}.usage.json"
+                prompt_tokens = estimate_tokens(task["instruction"]) + PROMPT_OVERHEAD_TOKENS
+                control_rows[task_id] = {
+                    "solved": cscore["solved"],
+                    "input_tokens": cscore["tool_output_tokens"] + prompt_tokens,
+                    "turns": cscore["turns"],
+                    "frontier_usd": json.loads(cusage_path.read_text())["usd"] if cusage_path.exists() else 0.0,
+                }
+
 
     if control_arm == "control-eval":
         control_rows = {
@@ -855,6 +872,67 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic", h
             else:
                 h_verdict = f"REJECT ({ratio_val:.2f}x provider tok/solved < 2.0x threshold)"
             print(f"  HOLDOUT GATES: {h_verdict}")
+
+        # Exact paired statistics
+        c_only = sum(1 for r in runs if not r.solved and control_rows.get(r.task_id, {}).get("solved"))
+        s_only = sum(1 for r in runs if r.solved and not control_rows.get(r.task_id, {}).get("solved"))
+        both_solve = sum(1 for r in runs if r.solved and control_rows.get(r.task_id, {}).get("solved"))
+        both_fail = sum(1 for r in runs if not r.solved and not control_rows.get(r.task_id, {}).get("solved"))
+        print("\n  paired solve breakdown:")
+        print(f"    both solve:         {both_solve:>3d}")
+        print(f"    control-only solve: {c_only:>3d}")
+        print(f"    slicer-only solve:  {s_only:>3d}")
+        print(f"    both fail:          {both_fail:>3d}")
+
+        # On both-solved tasks:
+        both_solved_ratios: list[float] = []
+        for r, u_s, u_c in zip(runs, slicer_usage, control_usage):
+            if r.solved and control_rows.get(r.task_id, {}).get("solved"):
+                s_tok = provider_tokens(u_s)
+                c_tok = provider_tokens(u_c)
+                if s_tok > 0:
+                    both_solved_ratios.append(c_tok / s_tok)
+
+        if both_solved_ratios:
+            bs = sorted(both_solved_ratios)
+            def pctl(vals: list[float], q: float) -> float:
+                return vals[min(len(vals) - 1, max(0, math.ceil(q * len(vals)) - 1))]
+            med = bs[len(bs) // 2]
+            geom = math.exp(sum(math.log(max(1e-6, x)) for x in bs) / len(bs))
+            print("\n  both-solved provider-token ratios (control / slicer savings):")
+            print(f"    median:            {med:.2f}x")
+            print(f"    geometric mean:    {geom:.2f}x")
+            print(f"    p25:               {pctl(bs, 0.25):.2f}x")
+            print(f"    p75:               {pctl(bs, 0.75):.2f}x")
+            print(f"    p95:               {pctl(bs, 0.95):.2f}x")
+            print(f"    max:               {max(bs):.2f}x")
+
+        # Template family breakdown
+        by_family: dict[str, dict] = {}
+        for t, r, u_s, u_c in zip(tasks, runs, slicer_usage, control_usage):
+            fam = t.get("template", "unknown")
+            if fam not in by_family:
+                by_family[fam] = {
+                    "count": 0, "s_solved": 0, "c_solved": 0,
+                    "s_tok": 0, "c_tok": 0,
+                }
+            f_entry = by_family[fam]
+            f_entry["count"] += 1
+            if r.solved:
+                f_entry["s_solved"] += 1
+            if control_rows.get(r.task_id, {}).get("solved"):
+                f_entry["c_solved"] += 1
+            f_entry["s_tok"] += provider_tokens(u_s)
+            f_entry["c_tok"] += provider_tokens(u_c)
+
+        print("\n  template family breakdown:")
+        print(f"    {'family':<12}{'tasks':>6}{'ctrl_ok':>9}{'slc_ok':>9}{'ctrl_tok':>11}{'slc_tok':>11}{'ratio':>8}")
+        for fam, d in sorted(by_family.items()):
+            c_tok = d["c_tok"]
+            s_tok = d["s_tok"]
+            ratio_str = f"{c_tok / s_tok:.2f}x" if s_tok > 0 else "—"
+            print(f"    {fam:<12}{d['count']:>6}{d['c_solved']:>9}{d['s_solved']:>9}{c_tok:>11}{s_tok:>11}{ratio_str:>8}")
+
 
 
 def main() -> None:

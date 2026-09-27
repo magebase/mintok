@@ -187,3 +187,15 @@ def method_excluded(ctx: SimpleNamespace, name: str) -> None:
 def fits_initial(ctx: SimpleNamespace) -> None:
     assert ctx.slice_.budget == 800, ctx.slice_.budget
     assert ctx.slice_.tokens <= 800, (ctx.slice_.tokens, ctx.slice_.text)
+
+
+@then("the slice ranking is independent of external solutions or reference fixes")
+def slice_ranking_independent(ctx: SimpleNamespace) -> None:
+    assert any(r.label == "parse_options" for r in ctx.slice_.regions)
+    bogus_solution = ctx.root.parent / "holdout_solutions.json"
+    bogus_solution.write_text('{"task": ["validate_options", "parse_options"]}')
+    re_slice = slice_task(ctx.root, ctx.instruction)
+    assert [r.label for r in re_slice.regions] == [r.label for r in ctx.slice_.regions]
+    assert re_slice.text == ctx.slice_.text
+    bogus_solution.unlink(missing_ok=True)
+
