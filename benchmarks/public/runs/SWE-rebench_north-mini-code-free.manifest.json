@@ -1,0 +1,49 @@
+{
+  "model_id": "cohere/north-mini-code:free",
+  "model_slug": "north-mini-code-free",
+  "openrouter_metadata": {
+    "id": "cohere/north-mini-code:free",
+    "name": "Cohere: North Mini Code (free)",
+    "context_length": 256000,
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "architecture": {
+      "modality": "text->text",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "tokenizer": "Cohere",
+      "instruct_type": null
+    },
+    "live_verified": true
+  },
+  "task_window": "SWE-rebench-Window-A",
+  "task_count": 50,
+  "control_solved": 31,
+  "mintok_solved": 31,
+  "solve_drop_pp": 0.0,
+  "efficiency_multiplier": 3.4504052468591175,
+  "efficiency_95_ci": {
+    "point": 3.4504052468591175,
+    "low": 3.3231819393831663,
+    "high": 3.5819303464720007,
+    "confidence": 0.95
+  },
+  "geomean_savings": 3.4704141422073285,
+  "geomean_95_ci": {
+    "point": 3.4704141422073285,
+    "low": 3.344116291380237,
+    "high": 3.5974068196681177,
+    "confidence": 0.95
+  },
+  "gate_verdict": "STRONG",
+  "trajectory_files": {
+    "control": "SWE-rebench_north-mini-code-free_control.jsonl",
+    "mintok": "SWE-rebench_north-mini-code-free_mintok.jsonl"
+  }
+}

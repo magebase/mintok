@@ -1,0 +1,51 @@
+{
+  "model_id": "stealth/space-bunny-alpha",
+  "model_slug": "space-bunny-alpha",
+  "openrouter_metadata": {
+    "id": "stealth/space-bunny-alpha",
+    "name": "Space Bunny Alpha",
+    "context_length": 1000000,
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "architecture": {
+      "modality": "text+image+video->text",
+      "input_modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "tokenizer": "Other",
+      "instruct_type": null
+    },
+    "live_verified": true
+  },
+  "task_window": "SWE-rebench-Window-A",
+  "task_count": 50,
+  "control_solved": 41,
+  "mintok_solved": 41,
+  "solve_drop_pp": 0.0,
+  "efficiency_multiplier": 3.8991914780067183,
+  "efficiency_95_ci": {
+    "point": 3.8991914780067183,
+    "low": 3.7951354232556893,
+    "high": 3.9985810125878842,
+    "confidence": 0.95
+  },
+  "geomean_savings": 3.9179124618007903,
+  "geomean_95_ci": {
+    "point": 3.9179124618007903,
+    "low": 3.8091993210805675,
+    "high": 4.017485757769489,
+    "confidence": 0.95
+  },
+  "gate_verdict": "STRONG",
+  "trajectory_files": {
+    "control": "SWE-rebench_space-bunny-alpha_control.jsonl",
+    "mintok": "SWE-rebench_space-bunny-alpha_mintok.jsonl"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "model_id": "qwen/qwen3.8-27b:free",
+  "model_slug": "qwen3-8-27b-free",
+  "openrouter_metadata": {
+    "id": "qwen/qwen3.8-27b:free",
+    "name": "Qwen: Qwen3.8 27B (free)",
+    "context_length": 262144,
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "architecture": {
+      "modality": "text+image+video->text",
+      "input_modalities": [
+        "text",
+        "image",
+        "video"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "tokenizer": "Qwen",
+      "instruct_type": null
+    },
+    "live_verified": true
+  },
+  "task_window": "SWE-rebench-Window-A",
+  "task_count": 50,
+  "control_solved": 32,
+  "mintok_solved": 32,
+  "solve_drop_pp": 0.0,
+  "efficiency_multiplier": 3.7551865457711338,
+  "efficiency_95_ci": {
+    "point": 3.7551865457711338,
+    "low": 3.6416742684245476,
+    "high": 3.879030948028824,
+    "confidence": 0.95
+  },
+  "geomean_savings": 3.7648137247914044,
+  "geomean_95_ci": {
+    "point": 3.7648137247914044,
+    "low": 3.6507313439504046,
+    "high": 3.8865061834471613,
+    "confidence": 0.95
+  },
+  "gate_verdict": "STRONG",
+  "trajectory_files": {
+    "control": "SWE-rebench_qwen3-8-27b-free_control.jsonl",
+    "mintok": "SWE-rebench_qwen3-8-27b-free_mintok.jsonl"
+  }
+}

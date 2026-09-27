@@ -25,6 +25,12 @@ sys.path.insert(0, str(HARNESS_ROOT / "src"))
 sys.path.insert(0, str(HARNESS_ROOT / "benchmarks" / "e2e"))
 
 from mintok.billing import PriceTable
+from mintok.openrouter_free import (
+    ALL_SEPT_2026_MODELS,
+    PRIMARY_FREE_MODELS,
+    STRESS_TEST_MODELS,
+    assert_models_free,
+)
 from mintok.public_bench import (
     PublicBenchmarkReport,
     PublicBenchmarkTask,
@@ -259,6 +265,46 @@ def verify_third_model_family() -> dict[str, Any]:
     }
 
 
+def verify_sept2026_free_models() -> dict[str, Any]:
+    """Verify that all September 2026 OpenRouter free models replicate token efficiency without solve regression."""
+    meta = assert_models_free(ALL_SEPT_2026_MODELS)
+    model_slugs = {
+        "qwen/qwen3.8-27b:free": "qwen3-8-27b-free",
+        "poolside/laguna-s-2.1:free": "laguna-s-2-1-free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free": "nemotron-3-ultra-free",
+        "cohere/north-mini-code:free": "north-mini-code-free",
+        "stealth/space-bunny-alpha": "space-bunny-alpha",
+    }
+    results = {}
+    for mid, slug in model_slugs.items():
+        c_path = RUNS_DIR / f"SWE-rebench_{slug}_control.jsonl"
+        m_path = RUNS_DIR / f"SWE-rebench_{slug}_mintok.jsonl"
+        assert c_path.exists() and m_path.exists(), f"Missing runs for {mid}"
+        ctrl_runs = [PublicRunRecord(**json.loads(line)) for line in c_path.read_text().splitlines() if line.strip()]
+        mintok_runs = [PublicRunRecord(**json.loads(line)) for line in m_path.read_text().splitlines() if line.strip()]
+        rep = evaluate_paired_public_runs(ctrl_runs, mintok_runs, compute_bootstrap=True, bootstrap_resamples=1000)
+        assert rep.solve_drop_pp <= 0.05, f"Solve drop > 5pp for {mid}: {rep.solve_drop_pp*100:.1f}pp"
+        assert rep.efficiency_multiplier >= 3.0, f"Efficiency multiplier < 3.0x for {mid}: {rep.efficiency_multiplier:.2f}x"
+        results[mid] = {
+            "model_id": mid,
+            "name": meta[mid].get("name", mid),
+            "context_length": meta[mid].get("context_length"),
+            "pricing": meta[mid].get("pricing"),
+            "total_tasks": rep.total_tasks,
+            "control_solved": rep.control_solved,
+            "mintok_solved": rep.mintok_solved,
+            "control_solve_rate": rep.control_solve_rate,
+            "mintok_solve_rate": rep.mintok_solve_rate,
+            "solve_drop_pp": rep.solve_drop_pp,
+            "efficiency_multiplier": rep.efficiency_multiplier,
+            "efficiency_ci": rep.efficiency_ci.format("x") if rep.efficiency_ci else f"{rep.efficiency_multiplier:.2f}x",
+            "both_solved_geomean": rep.both_solved_geomean,
+            "geomean_ci": rep.geomean_ci.format("x") if rep.geomean_ci else f"{rep.both_solved_geomean:.2f}x",
+            "gate_verdict": rep.gate_verdict,
+        }
+    return results
+
+
 def main() -> None:
     print("=" * 60)
     print("MinTok Public Benchmark Reproducibility & Audit Verifier")
@@ -279,27 +325,28 @@ def main() -> None:
     print(f"  ✓ Replayed token accounting on {accounting_audit['sample_size']} tasks across {accounting_audit['total_records_audited']} total records")
     print("    Token breakdown math (input + output == provider) 100% verified.")
 
-    print("\n4. Running cross-model validation (Anthropic & Google)...")
-    model2_audit = verify_second_model_family()
-    print(f"  ✓ Model family: {model2_audit['model_family']}")
-    print(f"    Control solve: {model2_audit['control_solve_rate']*100:.1f}%, MinTok solve: {model2_audit['mintok_solve_rate']*100:.1f}% (delta: {model2_audit['solve_drop_pp']*100:+.1f}pp)")
-    print(f"    Efficiency Multiplier: {model2_audit['efficiency_ci']} ({model2_audit['gate_verdict']})")
-    print(f"    Both-solved GeoMean Savings: {model2_audit['geomean_ci']}")
+    print("\n4. Auditing September 2026 OpenRouter Free Model Replications...")
+    sept_audit = verify_sept2026_free_models()
+    for mid, r in sept_audit.items():
+        print(f"  ✓ {mid:<42} Context: {r['context_length']} Pricing: $0")
+        print(f"    Control: {r['control_solved']}/{r['total_tasks']} | MinTok: {r['mintok_solved']}/{r['total_tasks']} (delta: {r['solve_drop_pp']*100:+.1f}pp)")
+        print(f"    Token Efficiency: {r['efficiency_ci']} | GeoMean: {r['geomean_ci']} ({r['gate_verdict']})")
 
+    print("\n5. Auditing Historical Model Replications...")
+    model2_audit = verify_second_model_family()
+    print(f"  ✓ Historical: {model2_audit['model_family']} Eff: {model2_audit['efficiency_ci']}")
     model3_audit = verify_third_model_family()
-    print(f"  ✓ Model family: {model3_audit['model_family']}")
-    print(f"    Control solve: {model3_audit['control_solve_rate']*100:.1f}%, MinTok solve: {model3_audit['mintok_solve_rate']*100:.1f}% (delta: {model3_audit['solve_drop_pp']*100:+.1f}pp)")
-    print(f"    Efficiency Multiplier: {model3_audit['efficiency_ci']} ({model3_audit['gate_verdict']})")
-    print(f"    Both-solved GeoMean Savings: {model3_audit['geomean_ci']}")
+    print(f"  ✓ Historical: {model3_audit['model_family']} Eff: {model3_audit['efficiency_ci']}")
 
     try:
         AUDIT_DIR.mkdir(parents=True, exist_ok=True)
         audit_manifest = {
-            "verified_at": "2026-09-27T19:30:00Z",
+            "verified_at": "2026-09-27T19:50:00Z",
             "windows": window_audit,
             "trajectory_hashes": hashes,
             "token_accounting_audit": accounting_audit,
-            "cross_model_validations": {
+            "september_2026_free_model_replications": sept_audit,
+            "historical_model_validations": {
                 "claude-3-5-sonnet": model2_audit,
                 "gemini-2.5-flash": model3_audit,
             },

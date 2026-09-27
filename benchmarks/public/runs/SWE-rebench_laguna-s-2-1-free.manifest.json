@@ -1,0 +1,49 @@
+{
+  "model_id": "poolside/laguna-s-2.1:free",
+  "model_slug": "laguna-s-2-1-free",
+  "openrouter_metadata": {
+    "id": "poolside/laguna-s-2.1:free",
+    "name": "Poolside: Laguna S 2.1 (free)",
+    "context_length": 262144,
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "architecture": {
+      "modality": "text->text",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "tokenizer": "Other",
+      "instruct_type": null
+    },
+    "live_verified": true
+  },
+  "task_window": "SWE-rebench-Window-A",
+  "task_count": 50,
+  "control_solved": 38,
+  "mintok_solved": 38,
+  "solve_drop_pp": 0.0,
+  "efficiency_multiplier": 3.5715509524210214,
+  "efficiency_95_ci": {
+    "point": 3.5715509524210214,
+    "low": 3.479328713619755,
+    "high": 3.6835670735194865,
+    "confidence": 0.95
+  },
+  "geomean_savings": 3.5953526017461632,
+  "geomean_95_ci": {
+    "point": 3.5953526017461632,
+    "low": 3.4990379011558757,
+    "high": 3.7088492977350396,
+    "confidence": 0.95
+  },
+  "gate_verdict": "STRONG",
+  "trajectory_files": {
+    "control": "SWE-rebench_laguna-s-2-1-free_control.jsonl",
+    "mintok": "SWE-rebench_laguna-s-2-1-free_mintok.jsonl"
+  }
+}

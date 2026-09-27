@@ -1,0 +1,49 @@
+{
+  "model_id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "model_slug": "nemotron-3-ultra-free",
+  "openrouter_metadata": {
+    "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "name": "NVIDIA: Nemotron 3 Ultra (free)",
+    "context_length": 1000000,
+    "pricing": {
+      "prompt": "0",
+      "completion": "0"
+    },
+    "architecture": {
+      "modality": "text->text",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "tokenizer": "Other",
+      "instruct_type": null
+    },
+    "live_verified": true
+  },
+  "task_window": "SWE-rebench-Window-A",
+  "task_count": 50,
+  "control_solved": 29,
+  "mintok_solved": 29,
+  "solve_drop_pp": 0.0,
+  "efficiency_multiplier": 3.743509480840375,
+  "efficiency_95_ci": {
+    "point": 3.743509480840375,
+    "low": 3.658899235261202,
+    "high": 3.8339190659395346,
+    "confidence": 0.95
+  },
+  "geomean_savings": 3.7516345390909507,
+  "geomean_95_ci": {
+    "point": 3.7516345390909507,
+    "low": 3.6711565518572673,
+    "high": 3.8390435016165463,
+    "confidence": 0.95
+  },
+  "gate_verdict": "STRONG",
+  "trajectory_files": {
+    "control": "SWE-rebench_nemotron-3-ultra-free_control.jsonl",
+    "mintok": "SWE-rebench_nemotron-3-ultra-free_mintok.jsonl"
+  }
+}

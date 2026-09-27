@@ -64,24 +64,36 @@ uv run mintok reproduce --benchmark terminal-bench-2.0
 
 ---
 
-## 4. Live Frontier Model Execution (Own API Credentials)
+## 4. Current September 2026 OpenRouter Free Model Matrix
 
-External evaluators wishing to run live trajectories with their own API keys can specify an OpenRouter or provider key:
+External evaluators wishing to test current models can use the frozen set of verified-free OpenRouter models:
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-v1-..."
 
-# Execute with your chosen frontier model
+# Execute with Qwen3.8 27B free (August 2026)
 uv run python benchmarks/public/reproduce.py \
     --benchmark swe-rebench \
-    --model anthropic/claude-3.5-sonnet \
+    --model qwen/qwen3.8-27b:free \
+    --quick
+
+# Or with Poolside Laguna S 2.1 free (July 2026)
+uv run python benchmarks/public/reproduce.py \
+    --benchmark swe-rebench \
+    --model poolside/laguna-s-2.1:free \
     --quick
 ```
 
-Supported model families tested in this repository:
-- `qwen/qwen-2.5-coder-32b-instruct` (primary baseline)
-- `anthropic/claude-3.5-sonnet` (second model family validation)
-- `google/gemini-2.5-flash` (third model family validation)
+**Primary Free Model Set (Zero Token Pricing, Fixed Identities)**:
+- `qwen/qwen3.8-27b:free` (released Aug 14, 2026; 262K context, 68.1 Coding Index)
+- `poolside/laguna-s-2.1:free` (released Jul 21, 2026; 262K context, tool-calling agent)
+- `nvidia/nemotron-3-ultra-550b-a55b:free` (released Jul 28, 2026; 1M context, 550B MoE agent)
+- `cohere/north-mini-code:free` (released Jun 18, 2026; 256K context, SWE-trained agent)
+
+**Current September 2026 Stress-Test**:
+- `stealth/space-bunny-alpha` (released Sep 23, 2026; 1M context stealth preview)
+
+*Important: Do NOT use `openrouter/free`, because dynamic model routing invalidates paired comparisons.*
 
 ---
 

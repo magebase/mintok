@@ -7,6 +7,16 @@
   "SWE-rebench-Window-200_mintok.jsonl": "1fcc381c5863d8d3478c6a5f7d8421483fe03009b82fae59d436d986ba60967e",
   "SWE-rebench-Window-A_control.jsonl": "25402b6ac50463d9c97476e8e9f52b9936885f35320f9d44d27e4b863c674959",
   "SWE-rebench-Window-A_mintok.jsonl": "fe0c5ae5de7e87e18a8456e62ce35d0df62929f2559d85e3252d0624b64ab925",
+  "SWE-rebench_laguna-s-2-1-free_control.jsonl": "a89a98468099b0418cc16a5e41d18b166a751cf310e258d796c4eb5921edd962",
+  "SWE-rebench_laguna-s-2-1-free_mintok.jsonl": "fe3ef4a0ef65539418f7b79ad981e66e612d86d2ed700d270da886bcebd40c68",
+  "SWE-rebench_nemotron-3-ultra-free_control.jsonl": "f560722e6634ed365ffe91e97038deda23d582a99505db3717f1d148798e9cd6",
+  "SWE-rebench_nemotron-3-ultra-free_mintok.jsonl": "c16e68d87c28d6f048b3281cedff179fb0d9f1c274752e352adae48c2804f0ee",
+  "SWE-rebench_north-mini-code-free_control.jsonl": "e32c2898eefda2a02bdbfde0904e6292e8caa31fd5e7d7a39e74d04a3e6e7cd3",
+  "SWE-rebench_north-mini-code-free_mintok.jsonl": "77237b378f06e1b7e8e63678ce8ca6329f7858d47bcf63fcbf991dc62e1cc602",
+  "SWE-rebench_qwen3-8-27b-free_control.jsonl": "2a67549ea0a25e041afecdf70a0f430f16398cee3de801c73b9d5b518ec5483b",
+  "SWE-rebench_qwen3-8-27b-free_mintok.jsonl": "2b5efa66671947ca120d0518b6f5d7cbed756f0df47a1caaddc9ec9b7f14e4f7",
+  "SWE-rebench_space-bunny-alpha_control.jsonl": "80e2f6997077a9e456395900ea7ed8d4f6898e8f8f27582af7ffa6b941e47eaf",
+  "SWE-rebench_space-bunny-alpha_mintok.jsonl": "d80044c880bcd73491ab93f416287a9f522982828413ed64d785348103cf7009",
   "Terminal-Bench-2.0-Window-D_control.jsonl": "09958cbe87e296ff9c662f3cbb174322f2da97f1cc41144ab262e0e58be52946",
   "Terminal-Bench-2.0-Window-D_mintok.jsonl": "5b5bff2da439105b6377d231d92c7c225e8bcf5831c1759030c96597c0f0eedd"
 }

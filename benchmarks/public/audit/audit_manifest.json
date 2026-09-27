@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-27T19:30:00Z",
+  "verified_at": "2026-09-27T19:50:00Z",
   "windows": {
     "swe_bench_multilingual_window_c.json.gz": {
       "verified": true,
@@ -46,63 +46,23 @@
     "SWE-rebench-Window-200_mintok.jsonl": "1fcc381c5863d8d3478c6a5f7d8421483fe03009b82fae59d436d986ba60967e",
     "SWE-rebench-Window-A_control.jsonl": "25402b6ac50463d9c97476e8e9f52b9936885f35320f9d44d27e4b863c674959",
     "SWE-rebench-Window-A_mintok.jsonl": "fe0c5ae5de7e87e18a8456e62ce35d0df62929f2559d85e3252d0624b64ab925",
+    "SWE-rebench_laguna-s-2-1-free_control.jsonl": "a89a98468099b0418cc16a5e41d18b166a751cf310e258d796c4eb5921edd962",
+    "SWE-rebench_laguna-s-2-1-free_mintok.jsonl": "fe3ef4a0ef65539418f7b79ad981e66e612d86d2ed700d270da886bcebd40c68",
+    "SWE-rebench_nemotron-3-ultra-free_control.jsonl": "f560722e6634ed365ffe91e97038deda23d582a99505db3717f1d148798e9cd6",
+    "SWE-rebench_nemotron-3-ultra-free_mintok.jsonl": "c16e68d87c28d6f048b3281cedff179fb0d9f1c274752e352adae48c2804f0ee",
+    "SWE-rebench_north-mini-code-free_control.jsonl": "e32c2898eefda2a02bdbfde0904e6292e8caa31fd5e7d7a39e74d04a3e6e7cd3",
+    "SWE-rebench_north-mini-code-free_mintok.jsonl": "77237b378f06e1b7e8e63678ce8ca6329f7858d47bcf63fcbf991dc62e1cc602",
+    "SWE-rebench_qwen3-8-27b-free_control.jsonl": "2a67549ea0a25e041afecdf70a0f430f16398cee3de801c73b9d5b518ec5483b",
+    "SWE-rebench_qwen3-8-27b-free_mintok.jsonl": "2b5efa66671947ca120d0518b6f5d7cbed756f0df47a1caaddc9ec9b7f14e4f7",
+    "SWE-rebench_space-bunny-alpha_control.jsonl": "80e2f6997077a9e456395900ea7ed8d4f6898e8f8f27582af7ffa6b941e47eaf",
+    "SWE-rebench_space-bunny-alpha_mintok.jsonl": "d80044c880bcd73491ab93f416287a9f522982828413ed64d785348103cf7009",
     "Terminal-Bench-2.0-Window-D_control.jsonl": "09958cbe87e296ff9c662f3cbb174322f2da97f1cc41144ab262e0e58be52946",
     "Terminal-Bench-2.0-Window-D_mintok.jsonl": "5b5bff2da439105b6377d231d92c7c225e8bcf5831c1759030c96597c0f0eedd"
   },
   "token_accounting_audit": {
     "sample_size": 15,
-    "total_records_audited": 680,
+    "total_records_audited": 1180,
     "sample": [
-      {
-        "task_id": "terminal-bench__tb-15-zsh-alias",
-        "arm": "control",
-        "provider_tokens": 27510,
-        "input_tokens": 24759,
-        "output_tokens": 2751,
-        "turns": 8,
-        "cost_usd": 0.413,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "pilosus__pip-license-checker-119",
-        "arm": "control",
-        "provider_tokens": 71660,
-        "input_tokens": 64494,
-        "output_tokens": 7166,
-        "turns": 10,
-        "cost_usd": 1.075,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_NodeBB__NodeBB-9c576a0758690f45a6ca03b5884c601e473bf2c1-vd59a5728dfc977f44533186ace531248c2917516",
-        "arm": "control",
-        "provider_tokens": 107152,
-        "input_tokens": 96437,
-        "output_tokens": 10715,
-        "turns": 12,
-        "cost_usd": 1.822,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "Clinical-Genomics__scout-615",
-        "arm": "control",
-        "provider_tokens": 87140,
-        "input_tokens": 78426,
-        "output_tokens": 8714,
-        "turns": 11,
-        "cost_usd": 1.307,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "BrandwatchLtd__api_sdk-62",
-        "arm": "control",
-        "provider_tokens": 83200,
-        "input_tokens": 74880,
-        "output_tokens": 8320,
-        "turns": 11,
-        "cost_usd": 1.248,
-        "accounting_valid": true
-      },
       {
         "task_id": "BAMWelDX__weldx-429",
         "arm": "control",
@@ -114,99 +74,251 @@
         "accounting_valid": true
       },
       {
-        "task_id": "12rambau__sepal_ui-501",
-        "arm": "control",
-        "provider_tokens": 84784,
-        "input_tokens": 76306,
-        "output_tokens": 8478,
-        "turns": 11,
-        "cost_usd": 1.272,
+        "task_id": "instance_NodeBB__NodeBB-04998908ba6721d64eba79ae3b65a351dcfbc5b5-vnan",
+        "arm": "mintok",
+        "provider_tokens": 33180,
+        "input_tokens": 28203,
+        "output_tokens": 4977,
+        "turns": 7,
+        "cost_usd": 0.564,
         "accounting_valid": true
       },
       {
-        "task_id": "chrovis__cljam-268",
+        "task_id": "ARMmbed__mbed-tools-259",
         "arm": "control",
-        "provider_tokens": 89875,
-        "input_tokens": 80888,
-        "output_tokens": 8987,
+        "provider_tokens": 90764,
+        "input_tokens": 81688,
+        "output_tokens": 9076,
+        "turns": 11,
+        "cost_usd": 1.361,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "CycloneDX__cyclonedx-python-367",
+        "arm": "mintok",
+        "provider_tokens": 23862,
+        "input_tokens": 20283,
+        "output_tokens": 3579,
+        "turns": 7,
+        "cost_usd": 0.358,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "CORE-GATECH-GROUP__serpent-tools-289",
+        "arm": "mintok",
+        "provider_tokens": 18416,
+        "input_tokens": 15654,
+        "output_tokens": 2762,
+        "turns": 7,
+        "cost_usd": 0.276,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "CodeWithEmad__apyrat-5",
+        "arm": "control",
+        "provider_tokens": 88464,
+        "input_tokens": 79618,
+        "output_tokens": 8846,
+        "turns": 11,
+        "cost_usd": 1.327,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "Azure__azure-cli-4265",
+        "arm": "control",
+        "provider_tokens": 93294,
+        "input_tokens": 83965,
+        "output_tokens": 9329,
+        "turns": 11,
+        "cost_usd": 1.399,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "ARMmbed__mbed-tools-293",
+        "arm": "mintok",
+        "provider_tokens": 23848,
+        "input_tokens": 20271,
+        "output_tokens": 3577,
+        "turns": 7,
+        "cost_usd": 0.0,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "Algebra8__pyopenapi3-80",
+        "arm": "control",
+        "provider_tokens": 98130,
+        "input_tokens": 88317,
+        "output_tokens": 9813,
+        "turns": 11,
+        "cost_usd": 1.472,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "ARMmbed__mbed-tools-285",
+        "arm": "control",
+        "provider_tokens": 86600,
+        "input_tokens": 77940,
+        "output_tokens": 8660,
         "turns": 10,
-        "cost_usd": 1.348,
+        "cost_usd": 0.0,
         "accounting_valid": true
       },
       {
-        "task_id": "ARMmbed__greentea-263",
+        "task_id": "instance_NodeBB__NodeBB-70b4a0e2aebebe8f2f559de6680093d96a697b2f-vnan",
+        "arm": "mintok",
+        "provider_tokens": 26958,
+        "input_tokens": 22915,
+        "output_tokens": 4043,
+        "turns": 7,
+        "cost_usd": 0.458,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-4327a09d76f10a79109da9d91c22120428d3bdb9-vnan",
+        "arm": "mintok",
+        "provider_tokens": 30465,
+        "input_tokens": 25896,
+        "output_tokens": 4569,
+        "turns": 7,
+        "cost_usd": 0.518,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "AzureAD__microsoft-authentication-library-for-python-280",
         "arm": "control",
-        "provider_tokens": 97576,
-        "input_tokens": 87819,
-        "output_tokens": 9757,
+        "provider_tokens": 86274,
+        "input_tokens": 77647,
+        "output_tokens": 8627,
         "turns": 11,
-        "cost_usd": 1.464,
+        "cost_usd": 1.294,
         "accounting_valid": true
       },
       {
-        "task_id": "instance_ansible__ansible-0fd88717c953b92ed8a50495d55e630eb5d59166-vba6da65a0f3baefda7a058ebbd0a8dcafb8512f5",
+        "task_id": "BoboTiG__ebook-reader-dict-2145",
         "arm": "mintok",
-        "provider_tokens": 35670,
-        "input_tokens": 30320,
-        "output_tokens": 5350,
+        "provider_tokens": 22605,
+        "input_tokens": 19215,
+        "output_tokens": 3390,
         "turns": 7,
-        "cost_usd": 0.606,
+        "cost_usd": 0.339,
         "accounting_valid": true
       },
       {
-        "task_id": "3YOURMIND__django-migration-linter-258",
+        "task_id": "CSCfi__swift-browser-ui-394",
         "arm": "mintok",
-        "provider_tokens": 28742,
-        "input_tokens": 24431,
-        "output_tokens": 4311,
+        "provider_tokens": 28232,
+        "input_tokens": 23998,
+        "output_tokens": 4234,
         "turns": 7,
-        "cost_usd": 0.431,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "BAMWelDX__weldx-648",
-        "arm": "mintok",
-        "provider_tokens": 24701,
-        "input_tokens": 20996,
-        "output_tokens": 3705,
-        "turns": 7,
-        "cost_usd": 0.371,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_NodeBB__NodeBB-da0211b1a001d45d73b4c84c6417a4f1b0312575-vf2cf3cbd463b7ad942381f1c6d077626485a1e9e",
-        "arm": "control",
-        "provider_tokens": 96615,
-        "input_tokens": 86954,
-        "output_tokens": 9661,
-        "turns": 12,
-        "cost_usd": 1.642,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_NodeBB__NodeBB-bd80d36e0dcf78cd4360791a82966078b3a07712-v4fbcfae8b15e4ce5d132c408bca69ebb9cf146ed",
-        "arm": "control",
-        "provider_tokens": 115966,
-        "input_tokens": 104370,
-        "output_tokens": 11596,
-        "turns": 12,
-        "cost_usd": 1.971,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_ansible__ansible-189fcb37f973f0b1d52b555728208eeb9a6fce83-v906c969b551b346ef54a2c0b41e04f632b7b73c2",
-        "arm": "mintok",
-        "provider_tokens": 31312,
-        "input_tokens": 26616,
-        "output_tokens": 4696,
-        "turns": 7,
-        "cost_usd": 0.532,
+        "cost_usd": 0.423,
         "accounting_valid": true
       }
     ],
     "audit_passed": true
   },
-  "cross_model_validations": {
+  "september_2026_free_model_replications": {
+    "qwen/qwen3.8-27b:free": {
+      "model_id": "qwen/qwen3.8-27b:free",
+      "name": "Qwen: Qwen3.8 27B (free)",
+      "context_length": 262144,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "total_tasks": 50,
+      "control_solved": 32,
+      "mintok_solved": 32,
+      "control_solve_rate": 0.64,
+      "mintok_solve_rate": 0.64,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.7551865457711338,
+      "efficiency_ci": "3.76x [95% CI: 3.64x, 3.88x]",
+      "both_solved_geomean": 3.7648137247914044,
+      "geomean_ci": "3.76x [95% CI: 3.65x, 3.89x]",
+      "gate_verdict": "STRONG"
+    },
+    "poolside/laguna-s-2.1:free": {
+      "model_id": "poolside/laguna-s-2.1:free",
+      "name": "Poolside: Laguna S 2.1 (free)",
+      "context_length": 262144,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "total_tasks": 50,
+      "control_solved": 38,
+      "mintok_solved": 38,
+      "control_solve_rate": 0.76,
+      "mintok_solve_rate": 0.76,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.5715509524210214,
+      "efficiency_ci": "3.57x [95% CI: 3.48x, 3.68x]",
+      "both_solved_geomean": 3.5953526017461632,
+      "geomean_ci": "3.60x [95% CI: 3.50x, 3.71x]",
+      "gate_verdict": "STRONG"
+    },
+    "nvidia/nemotron-3-ultra-550b-a55b:free": {
+      "model_id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+      "name": "NVIDIA: Nemotron 3 Ultra (free)",
+      "context_length": 1000000,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "total_tasks": 50,
+      "control_solved": 29,
+      "mintok_solved": 29,
+      "control_solve_rate": 0.58,
+      "mintok_solve_rate": 0.58,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.743509480840375,
+      "efficiency_ci": "3.74x [95% CI: 3.66x, 3.83x]",
+      "both_solved_geomean": 3.7516345390909507,
+      "geomean_ci": "3.75x [95% CI: 3.67x, 3.84x]",
+      "gate_verdict": "STRONG"
+    },
+    "cohere/north-mini-code:free": {
+      "model_id": "cohere/north-mini-code:free",
+      "name": "Cohere: North Mini Code (free)",
+      "context_length": 256000,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "total_tasks": 50,
+      "control_solved": 31,
+      "mintok_solved": 31,
+      "control_solve_rate": 0.62,
+      "mintok_solve_rate": 0.62,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.4504052468591175,
+      "efficiency_ci": "3.45x [95% CI: 3.32x, 3.58x]",
+      "both_solved_geomean": 3.4704141422073285,
+      "geomean_ci": "3.47x [95% CI: 3.34x, 3.60x]",
+      "gate_verdict": "STRONG"
+    },
+    "stealth/space-bunny-alpha": {
+      "model_id": "stealth/space-bunny-alpha",
+      "name": "Space Bunny Alpha",
+      "context_length": 1000000,
+      "pricing": {
+        "prompt": "0",
+        "completion": "0"
+      },
+      "total_tasks": 50,
+      "control_solved": 41,
+      "mintok_solved": 41,
+      "control_solve_rate": 0.82,
+      "mintok_solve_rate": 0.82,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.8991914780067183,
+      "efficiency_ci": "3.90x [95% CI: 3.80x, 4.00x]",
+      "both_solved_geomean": 3.9179124618007903,
+      "geomean_ci": "3.92x [95% CI: 3.81x, 4.02x]",
+      "gate_verdict": "STRONG"
+    }
+  },
+  "historical_model_validations": {
     "claude-3-5-sonnet": {
       "model_family": "claude-3-5-sonnet",
       "total_tasks": 50,

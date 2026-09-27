@@ -13,6 +13,7 @@ from verify_reproducibility import (  # noqa: E402
     audit_window_fingerprints,
     verify_independent_token_accounting,
     verify_second_model_family,
+    verify_sept2026_free_models,
 )
 
 scenarios("reproducibility_audit.feature")
@@ -66,6 +67,37 @@ def check_non_negative_tokens(ctx: SimpleNamespace) -> None:
         assert rec["output_tokens"] >= 0
 
 
+@given(parsers.parse('the September 2026 free model matrix including "{model_a}" and "{model_b}"'))
+def given_sept2026_matrix(ctx: SimpleNamespace, model_a: str, model_b: str) -> None:
+    ctx.matrix_models = [model_a, model_b]
+
+
+@when("the free model replication is audited")
+def when_free_replication_audited(ctx: SimpleNamespace) -> None:
+    ctx.free_model_results = verify_sept2026_free_models()
+
+
+@then("all endpoints are verified strictly free with zero token pricing")
+def check_endpoints_free(ctx: SimpleNamespace) -> None:
+    for mid, res in ctx.free_model_results.items():
+        pricing = res.get("pricing", {})
+        assert float(pricing.get("prompt", 0)) == 0.0
+        assert float(pricing.get("completion", 0)) == 0.0
+
+
+@then(parsers.parse("every model family achieves at least {min_mult:f}x token efficiency"))
+def check_every_model_efficiency(ctx: SimpleNamespace, min_mult: float) -> None:
+    for mid, res in ctx.free_model_results.items():
+        assert res["efficiency_multiplier"] >= min_mult
+
+
+@then(parsers.parse("no model exhibits solve rate degradation exceeding {max_drop:d} percentage points"))
+def check_no_solve_regression(ctx: SimpleNamespace, max_drop: int) -> None:
+    for mid, res in ctx.free_model_results.items():
+        assert res["solve_drop_pp"] * 100 <= max_drop
+
+
+@given(parsers.parse('a paired evaluation using a historical model family "{model_family}"'))
 @given(parsers.parse('a paired evaluation using a second model family "{model_family}"'))
 def given_second_model(ctx: SimpleNamespace, model_family: str) -> None:
     ctx.target_family = model_family
