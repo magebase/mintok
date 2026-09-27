@@ -454,6 +454,11 @@ def main(argv: list[str] | None = None) -> int:
                 deps = ", ".join(result.dependents) if result.dependents else "none"
                 output = f"removed: {result.removed.id}\nremaining references from: {deps}"
             else:
+                path = (args.root / args.file).resolve()
+                try:
+                    path.relative_to(args.root.resolve())
+                except ValueError:
+                    return finish("locked: patch escapes the task root", 3)
                 entry["args"] = {
                     "file": args.file,
                     "start": args.start,

@@ -168,4 +168,24 @@ Feature: Experiment funnel
     Then no solution files exist in the workspace
     And no checker source exists in the workspace
 
+  Scenario: The frozen holdout arm schedule is strictly balanced 50/50
+    When the frozen holdout arm schedule is loaded
+    Then it specifies exactly 20 control-first tasks and 20 slicer-first tasks
+
+  Scenario: Agent-exposed tools strictly reject paths escaping the workspace root
+    Given a benchmark workspace with an external secret file and an escaping symlink
+    When the agent attempts to read "../benchmarks/e2e/holdout_solutions.json"
+    Then the tool call is rejected with an escaping root error
+    When the agent attempts to read an absolute path to the external secret file
+    Then the tool call is rejected with an escaping root error
+    When the agent attempts to read the escaping symlink
+    Then the tool call is rejected with an escaping root error
+    When the agent attempts to patch "../benchmarks/e2e/holdout_solutions.json"
+    Then the tool call is rejected with an escaping root error
+    When the agent attempts to patch an absolute path to the external secret file
+    Then the tool call is rejected with an escaping root error
+    When the agent attempts to patch the escaping symlink
+    Then the tool call is rejected with an escaping root error
+
+
 

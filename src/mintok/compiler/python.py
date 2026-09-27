@@ -41,11 +41,17 @@ def module_name(relative: Path) -> str:
 
 
 def iter_python_files(root: Path) -> Iterator[Path]:
+    root_resolved = root.resolve()
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root)
         if any(p in SKIP_DIRS or p.startswith(".") for p in rel.parts[:-1]):
             continue
+        try:
+            path.resolve().relative_to(root_resolved)
+        except ValueError:
+            continue
         yield path
+
 
 
 def compile_repository(root: str | Path) -> ProgramIR:

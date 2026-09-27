@@ -124,7 +124,16 @@ class AgentABI:
         self.root = Path(root)
         self.ir = ir if ir is not None else compile_repository(self.root)
 
+    def _safe_path(self, rel_path: str) -> Path:
+        resolved = (self.root / rel_path).resolve()
+        try:
+            resolved.relative_to(self.root.resolve())
+        except ValueError:
+            raise ChangeRejected(f"path escapes workspace root: {rel_path}")
+        return resolved
+
     def _symbol(self, symbol_id: str) -> Symbol:
+
         try:
             return self.ir.symbols[symbol_id]
         except KeyError:
@@ -408,7 +417,7 @@ class AgentABI:
         if len(new_tree.body) != 1 or _defined_name(new_tree.body[0]) != short_name:
             raise ChangeRejected(f"new source must define exactly one symbol named {short_name}")
 
-        path = self.root / module_path
+        path = self._safe_path(module_path)
         created_file = not path.exists()
         if created_file:
             text = "".join(f"{imp}\n" for imp in imports) + ("\n" if imports else "") + new_src + "\n"
@@ -473,7 +482,7 @@ class AgentABI:
         Covers everything symbol-level ops cannot express (module docstrings,
         import lines, test files); the parse check is the only guardrail.
         """
-        path = self.root / file_path
+        path = self._safe_path(file_path)
         if not path.is_file():
             raise ChangeRejected(f"unknown file {file_path}")
         if start < 1 or end < start or end > len(path.read_text().splitlines()):

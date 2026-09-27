@@ -592,3 +592,122 @@ def no_checkers(ctx: SimpleNamespace) -> None:
         assert "assert cap_" not in content
 
 
+@when("the frozen holdout arm schedule is loaded")
+def load_frozen_schedule(ctx: SimpleNamespace) -> None:
+    import json as jsonlib
+
+    bench_dir = Path(__file__).resolve().parents[2] / "benchmarks" / "e2e"
+    sched_path = bench_dir / "holdout_schedule.json"
+    ctx.schedule = jsonlib.loads(sched_path.read_text())
+
+
+@then("it specifies exactly 20 control-first tasks and 20 slicer-first tasks")
+def verify_schedule_balance(ctx: SimpleNamespace) -> None:
+    sched = ctx.schedule["schedule"]
+    c_first = sum(1 for v in sched.values() if v[0] == "control")
+    s_first = sum(1 for v in sched.values() if v[0] == "slicer")
+    assert len(sched) == 40
+    assert c_first == 20
+    assert s_first == 20
+
+
+@given("a benchmark workspace with an external secret file and an escaping symlink")
+def workspace_with_symlink(ctx: SimpleNamespace, tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    (root / "src").mkdir()
+    (root / "src" / "main.py").write_text("print(1)\n")
+    outside = tmp_path / "secret.py"
+    outside.write_text("SECRET_DATA = 42\n")
+    sym = root / "symlink_escape.py"
+    sym.symlink_to(outside)
+    ctx.root = root
+    ctx.outside = outside
+    ctx.symlink = sym
+    ctx.log = root / "log.jsonl"
+    ctx.cli = Path(__file__).resolve().parents[2] / "benchmarks" / "e2e" / "agent_cli.py"
+
+
+@when(parsers.parse('the agent attempts to read "{path_arg}"'))
+def attempt_read(ctx: SimpleNamespace, path_arg: str) -> None:
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, str(ctx.cli), "--root", str(ctx.root), "--log", str(ctx.log), "--policy", "S", "read", path_arg],
+        capture_output=True, text=True,
+    )
+    ctx.last_result = res
+
+
+@when("the agent attempts to read an absolute path to the external secret file")
+def attempt_read_absolute(ctx: SimpleNamespace) -> None:
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, str(ctx.cli), "--root", str(ctx.root), "--log", str(ctx.log), "--policy", "S", "read", str(ctx.outside)],
+        capture_output=True, text=True,
+    )
+    ctx.last_result = res
+
+
+@when("the agent attempts to read the escaping symlink")
+def attempt_read_symlink(ctx: SimpleNamespace) -> None:
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, str(ctx.cli), "--root", str(ctx.root), "--log", str(ctx.log), "--policy", "S", "read", ctx.symlink.name],
+        capture_output=True, text=True,
+    )
+    ctx.last_result = res
+
+
+@when(parsers.parse('the agent attempts to patch "{path_arg}"'))
+def attempt_patch(ctx: SimpleNamespace, path_arg: str) -> None:
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, str(ctx.cli), "--root", str(ctx.root), "--log", str(ctx.log), "--policy", "S", "patch",
+         "--file", path_arg, "--start", "1", "--end", "1", "--source-file", str(ctx.root / "src" / "main.py")],
+        capture_output=True, text=True,
+    )
+    ctx.last_result = res
+
+
+@when("the agent attempts to patch an absolute path to the external secret file")
+def attempt_patch_absolute(ctx: SimpleNamespace) -> None:
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, str(ctx.cli), "--root", str(ctx.root), "--log", str(ctx.log), "--policy", "S", "patch",
+         "--file", str(ctx.outside), "--start", "1", "--end", "1", "--source-file", str(ctx.root / "src" / "main.py")],
+        capture_output=True, text=True,
+    )
+    ctx.last_result = res
+
+
+@when("the agent attempts to patch the escaping symlink")
+def attempt_patch_symlink(ctx: SimpleNamespace) -> None:
+    import subprocess
+    import sys
+
+    res = subprocess.run(
+        [sys.executable, str(ctx.cli), "--root", str(ctx.root), "--log", str(ctx.log), "--policy", "S", "patch",
+         "--file", ctx.symlink.name, "--start", "1", "--end", "1", "--source-file", str(ctx.root / "src" / "main.py")],
+        capture_output=True, text=True,
+    )
+    ctx.last_result = res
+
+
+@then("the tool call is rejected with an escaping root error")
+def tool_call_rejected_escape(ctx: SimpleNamespace) -> None:
+    assert ctx.last_result.returncode != 0
+    out = (ctx.last_result.stdout + ctx.last_result.stderr).lower()
+    assert "escapes" in out or "rejected" in out, out
+
+
+

@@ -67,6 +67,8 @@ TASKS_JSON = E2E_DIR / "tasks_generated.json"
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GENERATED_TASKS = Path(__file__).resolve().parent / "tasks_generated.json"
 HOLDOUT_TASKS = Path(__file__).resolve().parent / "tasks_holdout.json"
+HOLDOUT_SCHEDULE = Path(__file__).resolve().parent / "holdout_schedule.json"
+
 PROMPT_OVERHEAD_TOKENS = 250  # arm rules + JSON report instructions, identical for both arms
 
 
@@ -639,15 +641,31 @@ def promote_large(model: str, mock: bool = False, provider: str = "anthropic", h
             print(f"  - {reason}")
         print(f"running {len(tasks)} fresh control trajectories in this session (worth the spend)")
 
+    if holdout and HOLDOUT_SCHEDULE.exists():
+        schedule_data = json.loads(HOLDOUT_SCHEDULE.read_text())
+        task_schedule = schedule_data.get("schedule", {})
+        c_count = schedule_data.get("control_first_count", 0)
+        s_count = schedule_data.get("slicer_first_count", 0)
+        print(f"interleaving guard: loaded frozen 50/50 balanced schedule ({c_count} C->S, {s_count} S->C)")
+    else:
+        import random as _rnd
+        task_ids = sorted([t["id"] for t in tasks])
+        rng = _rnd.Random(hashlib.sha256("mintok-dev-schedule".encode()).digest())
+        shuffled = list(task_ids)
+        rng.shuffle(shuffled)
+        half = len(shuffled) // 2
+        ctrl_first = set(shuffled[:half])
+        task_schedule = {
+            tid: (["control", "slicer"] if tid in ctrl_first else ["slicer", "control"])
+            for tid in task_ids
+        }
+
     runs: list[SlicerRun] = []
     control_rows: dict[str, dict] = {}
     for task in tasks:
         task_id = task["id"]
-        # Paired execution interleaving:
-        # Determine randomized arm order per task using a deterministic hash seed
-        # to ensure reproducibility while balancing execution order across the 80 runs.
-        seed_byte = hashlib.sha256(f"{task_id}:{model}:arm_order".encode()).digest()[0]
-        arm_order = ["control", "slicer"] if (seed_byte % 2 == 1) else ["slicer", "control"]
+        arm_order = task_schedule.get(task_id, ["control", "slicer"])
+
 
         for arm_to_run in arm_order:
             if arm_to_run == "slicer":

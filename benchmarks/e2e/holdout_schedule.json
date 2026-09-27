@@ -1,0 +1,212 @@
+{
+  "seed": "mintok-holdout-40-v1",
+  "total_tasks": 40,
+  "control_first_count": 20,
+  "slicer_first_count": 20,
+  "control_first": [
+    "dispatch-holdout-01",
+    "dispatch-holdout-02",
+    "dispatch-holdout-04",
+    "dispatch-holdout-06",
+    "dispatch-holdout-09",
+    "inventory-holdout-02",
+    "inventory-holdout-04",
+    "inventory-holdout-07",
+    "inventory-holdout-09",
+    "inventory-holdout-10",
+    "ledger-holdout-01",
+    "ledger-holdout-02",
+    "ledger-holdout-07",
+    "ledger-holdout-09",
+    "metrics-holdout-04",
+    "metrics-holdout-05",
+    "metrics-holdout-06",
+    "metrics-holdout-07",
+    "metrics-holdout-08",
+    "metrics-holdout-10"
+  ],
+  "slicer_first": [
+    "dispatch-holdout-03",
+    "dispatch-holdout-05",
+    "dispatch-holdout-07",
+    "dispatch-holdout-08",
+    "dispatch-holdout-10",
+    "inventory-holdout-01",
+    "inventory-holdout-03",
+    "inventory-holdout-05",
+    "inventory-holdout-06",
+    "inventory-holdout-08",
+    "ledger-holdout-03",
+    "ledger-holdout-04",
+    "ledger-holdout-05",
+    "ledger-holdout-06",
+    "ledger-holdout-08",
+    "ledger-holdout-10",
+    "metrics-holdout-01",
+    "metrics-holdout-02",
+    "metrics-holdout-03",
+    "metrics-holdout-09"
+  ],
+  "schedule": {
+    "dispatch-holdout-01": [
+      "control",
+      "slicer"
+    ],
+    "dispatch-holdout-02": [
+      "control",
+      "slicer"
+    ],
+    "dispatch-holdout-03": [
+      "slicer",
+      "control"
+    ],
+    "dispatch-holdout-04": [
+      "control",
+      "slicer"
+    ],
+    "dispatch-holdout-05": [
+      "slicer",
+      "control"
+    ],
+    "dispatch-holdout-06": [
+      "control",
+      "slicer"
+    ],
+    "dispatch-holdout-07": [
+      "slicer",
+      "control"
+    ],
+    "dispatch-holdout-08": [
+      "slicer",
+      "control"
+    ],
+    "dispatch-holdout-09": [
+      "control",
+      "slicer"
+    ],
+    "dispatch-holdout-10": [
+      "slicer",
+      "control"
+    ],
+    "inventory-holdout-01": [
+      "slicer",
+      "control"
+    ],
+    "inventory-holdout-02": [
+      "control",
+      "slicer"
+    ],
+    "inventory-holdout-03": [
+      "slicer",
+      "control"
+    ],
+    "inventory-holdout-04": [
+      "control",
+      "slicer"
+    ],
+    "inventory-holdout-05": [
+      "slicer",
+      "control"
+    ],
+    "inventory-holdout-06": [
+      "slicer",
+      "control"
+    ],
+    "inventory-holdout-07": [
+      "control",
+      "slicer"
+    ],
+    "inventory-holdout-08": [
+      "slicer",
+      "control"
+    ],
+    "inventory-holdout-09": [
+      "control",
+      "slicer"
+    ],
+    "inventory-holdout-10": [
+      "control",
+      "slicer"
+    ],
+    "ledger-holdout-01": [
+      "control",
+      "slicer"
+    ],
+    "ledger-holdout-02": [
+      "control",
+      "slicer"
+    ],
+    "ledger-holdout-03": [
+      "slicer",
+      "control"
+    ],
+    "ledger-holdout-04": [
+      "slicer",
+      "control"
+    ],
+    "ledger-holdout-05": [
+      "slicer",
+      "control"
+    ],
+    "ledger-holdout-06": [
+      "slicer",
+      "control"
+    ],
+    "ledger-holdout-07": [
+      "control",
+      "slicer"
+    ],
+    "ledger-holdout-08": [
+      "slicer",
+      "control"
+    ],
+    "ledger-holdout-09": [
+      "control",
+      "slicer"
+    ],
+    "ledger-holdout-10": [
+      "slicer",
+      "control"
+    ],
+    "metrics-holdout-01": [
+      "slicer",
+      "control"
+    ],
+    "metrics-holdout-02": [
+      "slicer",
+      "control"
+    ],
+    "metrics-holdout-03": [
+      "slicer",
+      "control"
+    ],
+    "metrics-holdout-04": [
+      "control",
+      "slicer"
+    ],
+    "metrics-holdout-05": [
+      "control",
+      "slicer"
+    ],
+    "metrics-holdout-06": [
+      "control",
+      "slicer"
+    ],
+    "metrics-holdout-07": [
+      "control",
+      "slicer"
+    ],
+    "metrics-holdout-08": [
+      "control",
+      "slicer"
+    ],
+    "metrics-holdout-09": [
+      "slicer",
+      "control"
+    ],
+    "metrics-holdout-10": [
+      "control",
+      "slicer"
+    ]
+  }
+}
