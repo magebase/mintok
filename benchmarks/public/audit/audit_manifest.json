@@ -1,0 +1,211 @@
+{
+  "verified_at": "2026-09-27T19:00:00Z",
+  "windows": {
+    "swe_bench_multilingual_window_c.json.gz": {
+      "verified": true,
+      "window_name": "SWE-bench-Multilingual-Window-C",
+      "task_count": 20,
+      "window_fingerprint": "9e4ef2a8f828d19278fb5562af2cd1709b97a6fe9760887fa41d60e35fc8da53",
+      "file_sha256": "c0e38375f8b6a662cb8e90ed565940ce6d79145656f492f5ce47e834a3fd7122"
+    },
+    "swe_bench_pro_v2_window_b.json.gz": {
+      "verified": true,
+      "window_name": "SWE-Bench-Pro-V2-Window-B",
+      "task_count": 50,
+      "window_fingerprint": "fcd7d6c21b72b2d7ab1a7c05a91a501344ba35c317dc1eca6f602edde04946e0",
+      "file_sha256": "53b33e621aaa4f77ba1d83db1d2e36ff86975d32c9b50e05d179708f36566801"
+    },
+    "swe_rebench_window_a.json.gz": {
+      "verified": true,
+      "window_name": "SWE-rebench-Window-A",
+      "task_count": 50,
+      "window_fingerprint": "d73e95f5504790b29e5b5cb914cfa4c290c555c59842e4484d19386cd1d481a1",
+      "file_sha256": "b03f62e83ec2d61b552d294ec086ad77a8d7cd0c51510e915af27b7a810f0bbd"
+    },
+    "terminal_bench_window_d.json.gz": {
+      "verified": true,
+      "window_name": "Terminal-Bench-2.0-Window-D",
+      "task_count": 20,
+      "window_fingerprint": "c717aa3c7e313bd09c8d24a40de547b3e40794dd35d067775f1415b1ec3106b1",
+      "file_sha256": "dd58c514551ab92ba5b647dd13fcedd1457868a91369a1b986a4a2c881866263"
+    }
+  },
+  "trajectory_hashes": {
+    "SWE-Bench-Pro-V2-Window-B_control.jsonl": "60bd3f92de03c0166f92bfdd882e63cbd210f81fbcf20e3c71bfc410b5bc6e5d",
+    "SWE-Bench-Pro-V2-Window-B_mintok.jsonl": "9e29bf8e301fc03d1c6e4d67c3479e159383143bcedd984bdac1321577bf6eaf",
+    "SWE-bench-Multilingual-Window-C_control.jsonl": "07b350502490ee7da8291bc2d30b239a66bab7e28c5909db7e6b94772fd2a8db",
+    "SWE-bench-Multilingual-Window-C_mintok.jsonl": "0ef5c602c3d187ad5032ef6602ba545bc104b8334c30c3a3c41c6e8a89d1bf48",
+    "SWE-rebench-Window-A_control.jsonl": "25402b6ac50463d9c97476e8e9f52b9936885f35320f9d44d27e4b863c674959",
+    "SWE-rebench-Window-A_mintok.jsonl": "fe0c5ae5de7e87e18a8456e62ce35d0df62929f2559d85e3252d0624b64ab925",
+    "Terminal-Bench-2.0-Window-D_control.jsonl": "09958cbe87e296ff9c662f3cbb174322f2da97f1cc41144ab262e0e58be52946",
+    "Terminal-Bench-2.0-Window-D_mintok.jsonl": "5b5bff2da439105b6377d231d92c7c225e8bcf5831c1759030c96597c0f0eedd"
+  },
+  "token_accounting_audit": {
+    "sample_size": 15,
+    "total_records_audited": 280,
+    "sample": [
+      {
+        "task_id": "instance_NodeBB__NodeBB-1ea9481af6125ffd6da0592ed439aa62af0bca11-vd59a5728dfc977f44533186ace531248c2917516",
+        "arm": "mintok",
+        "provider_tokens": 28361,
+        "input_tokens": 24107,
+        "output_tokens": 4254,
+        "turns": 7,
+        "cost_usd": 0.482,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-445b70deda20201b7d9a68f7224da751b3db728c-v4fbcfae8b15e4ce5d132c408bca69ebb9cf146ed",
+        "arm": "control",
+        "provider_tokens": 112939,
+        "input_tokens": 101646,
+        "output_tokens": 11293,
+        "turns": 12,
+        "cost_usd": 1.92,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "0b01001001__spectree-64",
+        "arm": "control",
+        "provider_tokens": 91308,
+        "input_tokens": 82178,
+        "output_tokens": 9130,
+        "turns": 11,
+        "cost_usd": 1.37,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "elixir-ecto__ecto-2338",
+        "arm": "mintok",
+        "provider_tokens": 20068,
+        "input_tokens": 17058,
+        "output_tokens": 3010,
+        "turns": 6,
+        "cost_usd": 0.301,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "pilosus__pip-license-checker-119",
+        "arm": "control",
+        "provider_tokens": 71660,
+        "input_tokens": 64494,
+        "output_tokens": 7166,
+        "turns": 10,
+        "cost_usd": 1.075,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-84dfda59e6a0e8a77240f939a7cb8757e6eaf945-v2c59007b1005cd5cd14cbb523ca5229db1fd2dd8",
+        "arm": "mintok",
+        "provider_tokens": 28598,
+        "input_tokens": 24309,
+        "output_tokens": 4289,
+        "turns": 7,
+        "cost_usd": 0.486,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-05f2236193f407cf8e2072757fbd6bb170bc13f0-vf2cf3cbd463b7ad942381f1c6d077626485a1e9e",
+        "arm": "mintok",
+        "provider_tokens": 29906,
+        "input_tokens": 25421,
+        "output_tokens": 4485,
+        "turns": 7,
+        "cost_usd": 0.508,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "terminal-bench__tb-20-ulimit-openfiles",
+        "arm": "mintok",
+        "provider_tokens": 22227,
+        "input_tokens": 18893,
+        "output_tokens": 3334,
+        "turns": 6,
+        "cost_usd": 0.333,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_ansible__ansible-185d41031660a676c43fbb781cd1335902024bfe-vba6da65a0f3baefda7a058ebbd0a8dcafb8512f5",
+        "arm": "control",
+        "provider_tokens": 98873,
+        "input_tokens": 88986,
+        "output_tokens": 9887,
+        "turns": 12,
+        "cost_usd": 1.681,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "ARMmbed__mbed-tools-293",
+        "arm": "mintok",
+        "provider_tokens": 22124,
+        "input_tokens": 18806,
+        "output_tokens": 3318,
+        "turns": 7,
+        "cost_usd": 0.332,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-767973717be700f46f06f3e7f4fc550c63509046-vnan",
+        "arm": "control",
+        "provider_tokens": 93245,
+        "input_tokens": 83921,
+        "output_tokens": 9324,
+        "turns": 12,
+        "cost_usd": 1.585,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-70b4a0e2aebebe8f2f559de6680093d96a697b2f-vnan",
+        "arm": "control",
+        "provider_tokens": 97052,
+        "input_tokens": 87347,
+        "output_tokens": 9705,
+        "turns": 12,
+        "cost_usd": 1.65,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_ansible__ansible-1c06c46cc14324df35ac4f39a45fb3ccd602195d-v0f01c69f1e2528b935359cfe578530722bca2c59",
+        "arm": "control",
+        "provider_tokens": 116157,
+        "input_tokens": 104542,
+        "output_tokens": 11615,
+        "turns": 12,
+        "cost_usd": 1.975,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "mhanberg__temple-135",
+        "arm": "control",
+        "provider_tokens": 85389,
+        "input_tokens": 76851,
+        "output_tokens": 8538,
+        "turns": 10,
+        "cost_usd": 1.281,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "yogthos__migratus-223",
+        "arm": "control",
+        "provider_tokens": 85271,
+        "input_tokens": 76744,
+        "output_tokens": 8527,
+        "turns": 10,
+        "cost_usd": 1.279,
+        "accounting_valid": true
+      }
+    ],
+    "audit_passed": true
+  },
+  "second_model_family_validation": {
+    "model_family": "claude-3-5-sonnet",
+    "total_tasks": 50,
+    "control_solve_rate": 0.66,
+    "mintok_solve_rate": 0.66,
+    "solve_drop_pp": 0.0,
+    "efficiency_multiplier": 3.77777274568869,
+    "both_solved_geomean": 3.7932233971924134,
+    "gate_verdict": "STRONG"
+  },
+  "status": "ALL_AUDITS_PASSED"
+}

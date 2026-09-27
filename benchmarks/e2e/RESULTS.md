@@ -1014,7 +1014,32 @@ max:               1.28x
 
 #### Key Conclusions:
 1. **Real-Repository Validation**: Across real open-source GitHub repositories (SWE-rebench and SWE-Bench Pro V2), MinTok reproduces **3.3x–3.8x provider-token reduction** per solved task with zero solve-rate degradation.
-2. **Cross-Language Generality**: MinTok's semantic context compiler delivers consistent **2.8x–3.7x** savings across C, Clojure, C#, Dart, Elixir, Go, Java, and JS, proving that the efficiency gain stems from semantic context selection, not Python syntax or tokenizer idiosyncrasies.
-3. **Broad Agent Compatibility**: On Terminal-Bench 2.0 CLI tasks, MinTok achieves 80% solve rate identical to control with a 1.28x token efficiency, proving it does not degrade non-code agent execution.
+2. **Initial Multilingual Evidence**: Initial multilingual evidence suggests the efficiency mechanism transfers beyond Python, showing 2.8x–3.7x savings on solved tasks across C, Clojure, C#, Elixir, Go, and Java. However, external validity across non-Python languages remains provisional given the small sample size (20 tasks total, several languages with only 1 instance, and 0 solved tasks in Dart and JS).
+3. **Task-Type Specificity**: On Terminal-Bench 2.0 CLI tasks, MinTok achieves an 80% solve rate identical to control with a 1.28x token efficiency. This result is consistent with the hypothesis that MinTok helps substantially more on code-context-heavy repository navigation than generic terminal configuration tasks (though it does not prove causality), while demonstrating that MinTok does not degrade broader agent execution.
 4. **Tail Elimination**: In all coding benchmarks, p95 and max token consumption drop by ~3x–4x alongside median tokens, proving MinTok eliminates expensive agent wandering in the tail.
+
+### Reproducibility Artifacts and Verification Data
+
+All raw frozen windows, manifests, and trajectory logs are persisted directly in the repository for independent verification:
+
+- **Frozen Task Windows**:
+  - SWE-rebench Window A (50 tasks): [`benchmarks/public/windows/swe_rebench_window_a.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_rebench_window_a.json.gz) (SHA-256: `d73e95f5504790b29e5b5cb914cfa4c290c555c59842e4484d19386cd1d481a1`)
+  - SWE-Bench Pro V2 Window B (50 tasks): [`benchmarks/public/windows/swe_bench_pro_v2_window_b.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_bench_pro_v2_window_b.json.gz) (SHA-256: `fcd7d6c21b72b2d7ab1a7c05a91a501344ba35c317dc1eca6f602edde04946e0`)
+  - SWE-bench Multilingual Window C (20 tasks): [`benchmarks/public/windows/swe_bench_multilingual_window_c.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_bench_multilingual_window_c.json.gz) (SHA-256: `9e4ef2a8f828d19278fb5562af2cd1709b97a6fe9760887fa41d60e35fc8da53`)
+  - Terminal-Bench 2.0 Window D (20 tasks): [`benchmarks/public/windows/terminal_bench_window_d.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/terminal_bench_window_d.json.gz) (SHA-256: `c717aa3c7e313bd09c8d24a40de547b3e40794dd35d067775f1415b1ec3106b1`)
+
+- **Raw Run Trajectories & Records**:
+  - `benchmarks/public/runs/SWE-rebench-Window-A_control.jsonl`
+  - `benchmarks/public/runs/SWE-rebench-Window-A_mintok.jsonl`
+  - `benchmarks/public/runs/SWE-Bench-Pro-V2-Window-B_control.jsonl`
+  - `benchmarks/public/runs/SWE-Bench-Pro-V2-Window-B_mintok.jsonl`
+  - `benchmarks/public/runs/SWE-bench-Multilingual-Window-C_control.jsonl`
+  - `benchmarks/public/runs/SWE-bench-Multilingual-Window-C_mintok.jsonl`
+  - `benchmarks/public/runs/Terminal-Bench-2.0-Window-D_control.jsonl`
+  - `benchmarks/public/runs/Terminal-Bench-2.0-Window-D_mintok.jsonl`
+
+- **Independent Verification Command**:
+  ```bash
+  uv run python benchmarks/public/verify_reproducibility.py
+  ```
 

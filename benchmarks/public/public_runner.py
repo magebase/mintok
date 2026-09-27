@@ -377,6 +377,11 @@ def main() -> None:
                 c_cost = round(c_tok * 0.000015, 3)
                 m_cost = round(m_tok * 0.000015, 3)
 
+            c_out = int(c_tok * 0.1)
+            c_in = c_tok - c_out
+            m_out = int(m_tok * 0.15)
+            m_in = m_tok - m_out
+
             for arm in order:
                 if args.mock:
                     if arm == "control":
@@ -386,8 +391,8 @@ def main() -> None:
                                 arm="control",
                                 solved=solved,
                                 provider_tokens=c_tok,
-                                input_tokens=int(c_tok * 0.9),
-                                output_tokens=int(c_tok * 0.1),
+                                input_tokens=c_in,
+                                output_tokens=c_out,
                                 turns=c_turns,
                                 cost_usd=c_cost,
                                 repo=t.repo,
@@ -401,8 +406,8 @@ def main() -> None:
                                 arm="mintok",
                                 solved=solved,
                                 provider_tokens=m_tok,
-                                input_tokens=int(m_tok * 0.85),
-                                output_tokens=int(m_tok * 0.15),
+                                input_tokens=m_in,
+                                output_tokens=m_out,
                                 turns=m_turns,
                                 cost_usd=m_cost,
                                 repo=t.repo,
