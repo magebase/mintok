@@ -10,7 +10,9 @@ from pytest_bdd import given, parsers, scenarios, then, when
 HARNESS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HARNESS_ROOT / "benchmarks" / "public"))
 from verify_reproducibility import (  # noqa: E402
+    audit_trajectory_hashes,
     audit_window_fingerprints,
+    audit_zero_discordance_coupling,
     verify_independent_token_accounting,
     verify_second_model_family,
     verify_sept2026_free_models,
@@ -117,3 +119,30 @@ def check_solve_diff(ctx: SimpleNamespace, max_drop: int) -> None:
 @then(parsers.parse("the efficiency multiplier is at least {min_mult:f}x"))
 def check_eff_mult(ctx: SimpleNamespace, min_mult: float) -> None:
     assert ctx.model_results["efficiency_multiplier"] >= min_mult
+
+
+@given("the executed paired holdout trajectories with separate workspace directories")
+def given_holdout_trajectories(ctx: SimpleNamespace) -> None:
+    ctx.coupling_audit = audit_zero_discordance_coupling()
+
+
+@when("an auditor inspects API request IDs, trajectories, and final patches")
+def inspect_coupling(ctx: SimpleNamespace) -> None:
+    assert ctx.coupling_audit is not None
+    ctx.coupling_summary = ctx.coupling_audit["summary"]
+
+
+@then("all API request IDs are strictly independent with zero cross-arm collisions")
+def check_request_independence(ctx: SimpleNamespace) -> None:
+    assert ctx.coupling_summary["shared_request_ids"] == 0
+    assert ctx.coupling_summary["total_api_requests"] > 0
+
+
+@then(parsers.parse("at least {min_pct:d} percent of final patches exhibit distinct implementation diffs"))
+def check_patch_divergence(ctx: SimpleNamespace, min_pct: int) -> None:
+    assert ctx.coupling_summary["different_patch_pct"] >= min_pct
+
+
+@then(parsers.parse("completion text divergence between arms is {expected_pct:d} percent"))
+def check_completion_divergence(ctx: SimpleNamespace, expected_pct: int) -> None:
+    assert ctx.coupling_summary["completion_text_divergence_pct"] == float(expected_pct)

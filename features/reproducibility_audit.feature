@@ -28,3 +28,11 @@ Feature: Reproducibility and Audit Verification
     When the cross-model benchmark is evaluated
     Then the solve rate difference is at most 5 percentage points
     And the efficiency multiplier is at least 3.0x
+
+  Scenario: Zero-discordance audit confirms independent generation and lack of coupling
+    Given the executed paired holdout trajectories with separate workspace directories
+    When an auditor inspects API request IDs, trajectories, and final patches
+    Then all API request IDs are strictly independent with zero cross-arm collisions
+    And at least 40 percent of final patches exhibit distinct implementation diffs
+    And completion text divergence between arms is 100 percent
+

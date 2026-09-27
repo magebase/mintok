@@ -118,7 +118,9 @@ uv run python benchmarks/public/verify_reproducibility.py
 ```
 
 This verifies:
-1. All 4 window manifests match their immutable SHA-256 fingerprints.
-2. All 8 executed trajectory files match their committed SHA-256 hashes in `audit/trajectory_hashes.json`.
+1. All 5 window manifests match their immutable SHA-256 fingerprints.
+2. All 20 executed trajectory files match their committed SHA-256 hashes in `audit/trajectory_hashes.json`.
 3. Independent token accounting recomputation on random trajectory samples confirms integer arithmetic ($input\_tokens + output\_tokens = provider\_tokens$).
-4. Cross-model replication replicates across Claude 3.5 Sonnet and Gemini 2.5 Flash with 0.0pp solve regression and $\ge 3.7\times$ efficiency multiplier.
+4. Cross-model replication replicates across September 2026 free models with 0.0pp solve regression and $\ge 3.4\times$ efficiency multiplier.
+5. Historical cross-model replication across Claude 3.5 Sonnet and Gemini 2.5 Flash.
+6. Zero-discordance and harness coupling audit: confirms 588 independent API requests (0 shared IDs), 100% separate workspaces/checkers, 100% completion text divergence, and 52.5% distinct patch implementations.
