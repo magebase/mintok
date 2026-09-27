@@ -68,6 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
     bench = sub.add_parser("benchmark", help="compare baseline and optimizer run-record JSONL files")
     bench.add_argument("baseline", type=Path)
     bench.add_argument("optimizer", type=Path)
+
+    repro = sub.add_parser("reproduce", help="reproduce public benchmark paired efficiency results")
+    repro.add_argument(
+        "--benchmark",
+        default="swe-rebench",
+        choices=["swe-rebench", "swe-bench-pro-v2", "multilingual", "terminal-bench-2.0"],
+    )
+    repro.add_argument("--model", default="qwen/qwen-2.5-coder-32b-instruct")
+    repro.add_argument("--quick", action="store_true", help="run 10-task subset for fast verification")
+    repro.add_argument("--out", type=Path, default=None, help="write report JSON to this file")
     return parser
 
 
@@ -121,6 +131,17 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print(savings_summary(records).render())
         return 0
+
+    if args.command == "reproduce":
+        from mintok.reproduce import run_reproduction
+
+        report, passed = run_reproduction(
+            benchmark=args.benchmark,
+            model=args.model,
+            quick=args.quick,
+            output_path=args.out,
+        )
+        return 0 if passed else 1
 
     ir = compile_repository(args.root)
     for diagnostic in ir.diagnostics:

@@ -38,6 +38,8 @@ from mintok.public_bench import (  # noqa: E402
     normalize_swe_bench_pro_task,
     normalize_swe_rebench_task,
     normalize_terminal_bench_task,
+    render_markdown_report,
+    render_report_table,
     verify_window_fingerprint,
 )
 from mintok.tokens import estimate_tokens  # noqa: E402
@@ -177,99 +179,7 @@ def build_balanced_schedule(task_ids: list[str]) -> dict[str, list[str]]:
     }
 
 
-def render_report_table(rep: PublicBenchmarkReport, benchmark_name: str) -> str:
-    lines = [
-        f"\n{benchmark_name} Public Benchmark Paired Efficiency Report ({rep.total_tasks} tasks):",
-        f"  {'metric':<28}{'control':>16}{'mintok':>16}{'delta':>12}",
-        f"  {'-'*74}",
-        f"  {'solved':<28}{f'{rep.control_solved}/{rep.total_tasks}':>16}{f'{rep.mintok_solved}/{rep.total_tasks}':>16}{f'{rep.mintok_solve_rate / rep.control_solve_rate:.2f}x' if rep.control_solve_rate else '-':>12}",
-        f"  {'solve rate':<28}{f'{rep.control_solve_rate*100:.1f}%':>16}{f'{rep.mintok_solve_rate*100:.1f}%':>16}{f'{rep.solve_drop_pp*100:+.1f}pp':>12}",
-        f"  {'tokens / attempt':<28}{f'{rep.control_tokens_per_attempt:.0f}':>16}{f'{rep.mintok_tokens_per_attempt:.0f}':>16}{f'{rep.control_tokens_per_attempt / rep.mintok_tokens_per_attempt:.2f}x' if rep.mintok_tokens_per_attempt else '-':>12}",
-        f"  {'tokens / solved':<28}{f'{rep.control_ptok_per_solved:.0f}':>16}{f'{rep.mintok_ptok_per_solved:.0f}':>16}{f'{rep.efficiency_multiplier:.2f}x' if rep.efficiency_multiplier else '-':>12}",
-        f"  {'total provider tokens':<28}{f'{rep.control_tokens:,}':>16}{f'{rep.mintok_tokens:,}':>16}{f'{rep.control_tokens / rep.mintok_tokens:.2f}x' if rep.mintok_tokens else '-':>12}",
-        f"  {'$ / solved':<28}{f'${rep.control_usd_per_solved:.2f}':>16}{f'${rep.mintok_usd_per_solved:.2f}':>16}{f'{rep.control_usd_per_solved / rep.mintok_usd_per_solved:.2f}x' if rep.mintok_usd_per_solved else '-':>12}",
-        f"  {'token p50 / p95 / max':<28}{f'{rep.control_p50_tokens:.0f}/{rep.control_p95_tokens:.0f}/{rep.control_max_tokens}':>16}{f'{rep.mintok_p50_tokens:.0f}/{rep.mintok_p95_tokens:.0f}/{rep.mintok_max_tokens}':>16}{'-':>12}",
-        f"  {'-'*74}",
-        f"  GATE VERDICT: {rep.gate_verdict} (pass >= 2.0x, strong >= 3.0x, excellent >= 4.0x)",
-        "",
-        "  paired solve breakdown:",
-        f"    both solve:          {rep.both_solve:>3d}",
-        f"    control-only solve:  {rep.control_only:>3d}",
-        f"    mintok-only solve:   {rep.mintok_only:>3d}",
-        f"    both fail:           {rep.both_fail:>3d}",
-        "",
-        "  both-solved provider-token ratios (savings):",
-        f"    median:             {rep.both_solved_median:.2f}x",
-        f"    geometric mean:     {rep.both_solved_geomean:.2f}x",
-        f"    p25:                {rep.both_solved_p25:.2f}x",
-        f"    p75:                {rep.both_solved_p75:.2f}x",
-        f"    p95:                {rep.both_solved_p95:.2f}x",
-        f"    max:                {rep.both_solved_max:.2f}x",
-    ]
-    if rep.stratification:
-        lines += [
-            "",
-            "  stratification breakdown:",
-            f"    {'category / repo':<28}{'tasks':>6}{'ctrl_ok':>9}{'min_ok':>9}{'ratio':>8}",
-        ]
-        for cat, d in sorted(rep.stratification.items()):
-            c_tok = d["ctrl_tok"]
-            m_tok = d["mintok_tok"]
-            ratio = f"{c_tok / m_tok:.2f}x" if m_tok > 0 else "—"
-            lines.append(f"    {cat:<28}{d['count']:>6}{d['ctrl_ok']:>9}{d['mintok_ok']:>9}{ratio:>8}")
 
-    return "\n".join(lines)
-
-
-def render_markdown_report(rep: PublicBenchmarkReport, benchmark_name: str) -> str:
-    md = [
-        f"### {benchmark_name} — Paired Evaluation Report",
-        "",
-        f"Evaluated on {rep.total_tasks} tasks using paired same-model execution, 50/50 interleaved schedule, and zero-access reference isolation.",
-        "",
-        "| metric | control | mintok | delta |",
-        "|---|---|---|---|",
-        f"| **solved** | **{rep.control_solved} / {rep.total_tasks}** | **{rep.mintok_solved} / {rep.total_tasks}** | **{rep.mintok_solve_rate / rep.control_solve_rate:.2f}x** ({rep.solve_drop_pp*100:+.1f}pp) |",
-        f"| **solve rate** | **{rep.control_solve_rate*100:.1f}%** | **{rep.mintok_solve_rate*100:.1f}%** | **{rep.solve_drop_pp*100:+.1f}pp** |",
-        f"| **tokens / attempt** | {rep.control_tokens_per_attempt:,.0f} | {rep.mintok_tokens_per_attempt:,.0f} | **{rep.control_tokens_per_attempt / rep.mintok_tokens_per_attempt:.2f}x** |",
-        f"| **tokens / solved** | **{rep.control_ptok_per_solved:,.0f}** | **{rep.mintok_ptok_per_solved:,.0f}** | **{rep.efficiency_multiplier:.2f}x** ({rep.gate_verdict}) |",
-        f"| **$/solved** | ${rep.control_usd_per_solved:.2f} | ${rep.mintok_usd_per_solved:.2f} | **{rep.control_usd_per_solved / rep.mintok_usd_per_solved:.2f}x** |" if rep.control_usd_per_solved else "",
-        f"| **token p50 / p95 / max** | {rep.control_p50_tokens:,.0f} / {rep.control_p95_tokens:,.0f} / {rep.control_max_tokens:,} | {rep.mintok_p50_tokens:,.0f} / {rep.mintok_p95_tokens:,.0f} / {rep.mintok_max_tokens:,} | — |",
-        "",
-        f"**GATE VERDICT: {rep.gate_verdict} (Efficiency Multiplier: {rep.efficiency_multiplier:.2f}x, Solve Delta: {rep.solve_drop_pp*100:+.1f}pp)**",
-        "",
-        "#### Paired Solve Breakdown",
-        "```text",
-        f"both solve:          {rep.both_solve}",
-        f"control-only solve:  {rep.control_only}",
-        f"mintok-only solve:   {rep.mintok_only}",
-        f"both fail:           {rep.both_fail}",
-        "```",
-        "",
-        "#### Both-Solved Provider-Token Ratios (Savings)",
-        "```text",
-        f"median:            {rep.both_solved_median:.2f}x",
-        f"geometric mean:    {rep.both_solved_geomean:.2f}x",
-        f"p25:               {rep.both_solved_p25:.2f}x",
-        f"p75:               {rep.both_solved_p75:.2f}x",
-        f"p95:               {rep.both_solved_p95:.2f}x",
-        f"max:               {rep.both_solved_max:.2f}x",
-        "```",
-    ]
-    if rep.stratification:
-        md += [
-            "",
-            "#### Stratification Breakdown",
-            "| category / repo | tasks | control solved | mintok solved | token ratio |",
-            "|---|---|---|---|---|",
-        ]
-        for cat, d in sorted(rep.stratification.items()):
-            c_tok = d["ctrl_tok"]
-            m_tok = d["mintok_tok"]
-            ratio = f"**{c_tok / m_tok:.2f}x**" if m_tok > 0 else "—"
-            md.append(f"| `{cat}` | {d['count']} | {d['ctrl_ok']} | {d['mintok_ok']} | {ratio} |")
-    md.append("")
-    return "\n".join(l for l in md if l)
 
 
 def main() -> None:
