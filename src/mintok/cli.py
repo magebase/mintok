@@ -73,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     repro.add_argument(
         "--benchmark",
         default="swe-rebench",
-        choices=["swe-rebench", "swe-bench-pro-v2", "multilingual", "terminal-bench-2.0"],
+        choices=["swe-rebench", "swe-rebench-200", "swe-bench-pro-v2", "multilingual", "terminal-bench-2.0"],
     )
     repro.add_argument("--model", default="qwen/qwen-2.5-coder-32b-instruct")
     repro.add_argument("--quick", action="store_true", help="run 10-task subset for fast verification")

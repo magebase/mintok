@@ -11,7 +11,7 @@ Feature: Reproducibility and Audit Verification
     And no task fingerprint has drifted
 
   Scenario: Independent token accounting check confirms provider token integrity
-    Given 280 executed public benchmark trajectory records
+    Given 680 executed public benchmark trajectory records
     When an independent auditor samples 15 random task trajectories
     Then the provider token total strictly equals the sum of input and output tokens
     And no trajectory contains zero or negative token values

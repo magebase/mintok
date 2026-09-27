@@ -1008,6 +1008,7 @@ max:               1.28x
 |---|---|---|---|---|---|---|---|---|
 | **Synthetic Holdout** | 1,033-LOC Synthetic Modules | 40 | 100.0% (40/40) | 100.0% (40/40) | +0.0pp | **4.86x** [4.52x, 5.24x] | **5.20x** [4.81x, 5.62x] | **EXCELLENT** |
 | **SWE-rebench** (Phase A) | Real Recent GitHub Repos | 50 | 62.0% (31/50) | 62.0% (31/50) | +0.0pp | **3.75x** [3.61x, 3.89x] | **3.77x** [3.63x, 3.91x] | **STRONG** |
+| **SWE-rebench Scaled** (200 Tasks) | Real Recent GitHub Repos | 200 | 64.0% (128/200) | 64.0% (128/200) | +0.0pp | **3.86x** [3.78x, 3.94x] | **3.88x** [3.81x, 3.96x] | **STRONG** |
 | **SWE-Bench Pro V2** (Phase B) | Real ScaleAI Production Repos | 50 | 60.0% (30/50) | 60.0% (30/50) | +0.0pp | **3.28x** [3.15x, 3.42x] | **3.29x** [3.16x, 3.43x] | **STRONG** |
 | **SWE-bench Multilingual** (Phase C) | 8 Programming Languages | 20 | 55.0% (11/20) | 55.0% (11/20) | +0.0pp | **3.24x** [3.05x, 3.45x] | **3.27x** [3.07x, 3.48x] | **STRONG** |
 | **Terminal-Bench 2.0** (Phase D) | CLI / Environment Admin | 20 | 80.0% (16/20) | 80.0% (16/20) | +0.0pp | **1.28x** [1.27x, 1.29x] | **1.28x** [1.27x, 1.29x] | COMPATIBLE |
@@ -1049,13 +1050,16 @@ We distinguish strictly between internal audit verification and third-party inde
 
 - **Frozen Task Windows**:
   - SWE-rebench Window A (50 tasks): [`benchmarks/public/windows/swe_rebench_window_a.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_rebench_window_a.json.gz) (SHA-256: `d73e95f5504790b29e5b5cb914cfa4c290c555c59842e4484d19386cd1d481a1`)
+  - SWE-rebench Scaled Window (200 tasks): [`benchmarks/public/windows/swe_rebench_window_200.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_rebench_window_200.json.gz) (SHA-256: `c1ec6b5a5ca1e205113d7aeb124bc39cf4280f1417fa6d719e8811a5dd0f2501`)
   - SWE-Bench Pro V2 Window B (50 tasks): [`benchmarks/public/windows/swe_bench_pro_v2_window_b.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_bench_pro_v2_window_b.json.gz) (SHA-256: `fcd7d6c21b72b2d7ab1a7c05a91a501344ba35c317dc1eca6f602edde04946e0`)
   - SWE-bench Multilingual Window C (20 tasks): [`benchmarks/public/windows/swe_bench_multilingual_window_c.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_bench_multilingual_window_c.json.gz) (SHA-256: `9e4ef2a8f828d19278fb5562af2cd1709b97a6fe9760887fa41d60e35fc8da53`)
   - Terminal-Bench 2.0 Window D (20 tasks): [`benchmarks/public/windows/terminal_bench_window_d.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/terminal_bench_window_d.json.gz) (SHA-256: `c717aa3c7e313bd09c8d24a40de547b3e40794dd35d067775f1415b1ec3106b1`)
 
-- **Raw Run Trajectories & Records**:
+- **Raw Run Trajectories & Records (680 total records)**:
   - `benchmarks/public/runs/SWE-rebench-Window-A_control.jsonl`
   - `benchmarks/public/runs/SWE-rebench-Window-A_mintok.jsonl`
+  - `benchmarks/public/runs/SWE-rebench-Window-200_control.jsonl`
+  - `benchmarks/public/runs/SWE-rebench-Window-200_mintok.jsonl`
   - `benchmarks/public/runs/SWE-Bench-Pro-V2-Window-B_control.jsonl`
   - `benchmarks/public/runs/SWE-Bench-Pro-V2-Window-B_mintok.jsonl`
   - `benchmarks/public/runs/SWE-bench-Multilingual-Window-C_control.jsonl`

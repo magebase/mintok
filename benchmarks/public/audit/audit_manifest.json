@@ -1,5 +1,5 @@
 {
-  "verified_at": "2026-09-27T19:00:00Z",
+  "verified_at": "2026-09-27T19:30:00Z",
   "windows": {
     "swe_bench_multilingual_window_c.json.gz": {
       "verified": true,
@@ -14,6 +14,13 @@
       "task_count": 50,
       "window_fingerprint": "fcd7d6c21b72b2d7ab1a7c05a91a501344ba35c317dc1eca6f602edde04946e0",
       "file_sha256": "53b33e621aaa4f77ba1d83db1d2e36ff86975d32c9b50e05d179708f36566801"
+    },
+    "swe_rebench_window_200.json.gz": {
+      "verified": true,
+      "window_name": "SWE-rebench-Window-200",
+      "task_count": 200,
+      "window_fingerprint": "c1ec6b5a5ca1e205113d7aeb124bc39cf4280f1417fa6d719e8811a5dd0f2501",
+      "file_sha256": "8b10ff7a760b51fe140bdb839499b6e6df0f2b959dd1052428052624ecef35fa"
     },
     "swe_rebench_window_a.json.gz": {
       "verified": true,
@@ -35,6 +42,8 @@
     "SWE-Bench-Pro-V2-Window-B_mintok.jsonl": "9e29bf8e301fc03d1c6e4d67c3479e159383143bcedd984bdac1321577bf6eaf",
     "SWE-bench-Multilingual-Window-C_control.jsonl": "07b350502490ee7da8291bc2d30b239a66bab7e28c5909db7e6b94772fd2a8db",
     "SWE-bench-Multilingual-Window-C_mintok.jsonl": "0ef5c602c3d187ad5032ef6602ba545bc104b8334c30c3a3c41c6e8a89d1bf48",
+    "SWE-rebench-Window-200_control.jsonl": "a9b94c7ae925ddef5449206526751633b8847838fae767c74b6712032bad3e06",
+    "SWE-rebench-Window-200_mintok.jsonl": "1fcc381c5863d8d3478c6a5f7d8421483fe03009b82fae59d436d986ba60967e",
     "SWE-rebench-Window-A_control.jsonl": "25402b6ac50463d9c97476e8e9f52b9936885f35320f9d44d27e4b863c674959",
     "SWE-rebench-Window-A_mintok.jsonl": "fe0c5ae5de7e87e18a8456e62ce35d0df62929f2559d85e3252d0624b64ab925",
     "Terminal-Bench-2.0-Window-D_control.jsonl": "09958cbe87e296ff9c662f3cbb174322f2da97f1cc41144ab262e0e58be52946",
@@ -42,46 +51,16 @@
   },
   "token_accounting_audit": {
     "sample_size": 15,
-    "total_records_audited": 280,
+    "total_records_audited": 680,
     "sample": [
       {
-        "task_id": "instance_NodeBB__NodeBB-1ea9481af6125ffd6da0592ed439aa62af0bca11-vd59a5728dfc977f44533186ace531248c2917516",
-        "arm": "mintok",
-        "provider_tokens": 28361,
-        "input_tokens": 24107,
-        "output_tokens": 4254,
-        "turns": 7,
-        "cost_usd": 0.482,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_NodeBB__NodeBB-445b70deda20201b7d9a68f7224da751b3db728c-v4fbcfae8b15e4ce5d132c408bca69ebb9cf146ed",
+        "task_id": "terminal-bench__tb-15-zsh-alias",
         "arm": "control",
-        "provider_tokens": 112939,
-        "input_tokens": 101646,
-        "output_tokens": 11293,
-        "turns": 12,
-        "cost_usd": 1.92,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "0b01001001__spectree-64",
-        "arm": "control",
-        "provider_tokens": 91308,
-        "input_tokens": 82178,
-        "output_tokens": 9130,
-        "turns": 11,
-        "cost_usd": 1.37,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "elixir-ecto__ecto-2338",
-        "arm": "mintok",
-        "provider_tokens": 20068,
-        "input_tokens": 17058,
-        "output_tokens": 3010,
-        "turns": 6,
-        "cost_usd": 0.301,
+        "provider_tokens": 27510,
+        "input_tokens": 24759,
+        "output_tokens": 2751,
+        "turns": 8,
+        "cost_usd": 0.413,
         "accounting_valid": true
       },
       {
@@ -95,117 +74,163 @@
         "accounting_valid": true
       },
       {
-        "task_id": "instance_NodeBB__NodeBB-84dfda59e6a0e8a77240f939a7cb8757e6eaf945-v2c59007b1005cd5cd14cbb523ca5229db1fd2dd8",
-        "arm": "mintok",
-        "provider_tokens": 28598,
-        "input_tokens": 24309,
-        "output_tokens": 4289,
-        "turns": 7,
-        "cost_usd": 0.486,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_NodeBB__NodeBB-05f2236193f407cf8e2072757fbd6bb170bc13f0-vf2cf3cbd463b7ad942381f1c6d077626485a1e9e",
-        "arm": "mintok",
-        "provider_tokens": 29906,
-        "input_tokens": 25421,
-        "output_tokens": 4485,
-        "turns": 7,
-        "cost_usd": 0.508,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "terminal-bench__tb-20-ulimit-openfiles",
-        "arm": "mintok",
-        "provider_tokens": 22227,
-        "input_tokens": 18893,
-        "output_tokens": 3334,
-        "turns": 6,
-        "cost_usd": 0.333,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_ansible__ansible-185d41031660a676c43fbb781cd1335902024bfe-vba6da65a0f3baefda7a058ebbd0a8dcafb8512f5",
+        "task_id": "instance_NodeBB__NodeBB-9c576a0758690f45a6ca03b5884c601e473bf2c1-vd59a5728dfc977f44533186ace531248c2917516",
         "arm": "control",
-        "provider_tokens": 98873,
-        "input_tokens": 88986,
-        "output_tokens": 9887,
+        "provider_tokens": 107152,
+        "input_tokens": 96437,
+        "output_tokens": 10715,
         "turns": 12,
-        "cost_usd": 1.681,
+        "cost_usd": 1.822,
         "accounting_valid": true
       },
       {
-        "task_id": "ARMmbed__mbed-tools-293",
-        "arm": "mintok",
-        "provider_tokens": 22124,
-        "input_tokens": 18806,
-        "output_tokens": 3318,
-        "turns": 7,
-        "cost_usd": 0.332,
-        "accounting_valid": true
-      },
-      {
-        "task_id": "instance_NodeBB__NodeBB-767973717be700f46f06f3e7f4fc550c63509046-vnan",
+        "task_id": "Clinical-Genomics__scout-615",
         "arm": "control",
-        "provider_tokens": 93245,
-        "input_tokens": 83921,
-        "output_tokens": 9324,
-        "turns": 12,
-        "cost_usd": 1.585,
+        "provider_tokens": 87140,
+        "input_tokens": 78426,
+        "output_tokens": 8714,
+        "turns": 11,
+        "cost_usd": 1.307,
         "accounting_valid": true
       },
       {
-        "task_id": "instance_NodeBB__NodeBB-70b4a0e2aebebe8f2f559de6680093d96a697b2f-vnan",
+        "task_id": "BrandwatchLtd__api_sdk-62",
         "arm": "control",
-        "provider_tokens": 97052,
-        "input_tokens": 87347,
-        "output_tokens": 9705,
-        "turns": 12,
-        "cost_usd": 1.65,
+        "provider_tokens": 83200,
+        "input_tokens": 74880,
+        "output_tokens": 8320,
+        "turns": 11,
+        "cost_usd": 1.248,
         "accounting_valid": true
       },
       {
-        "task_id": "instance_ansible__ansible-1c06c46cc14324df35ac4f39a45fb3ccd602195d-v0f01c69f1e2528b935359cfe578530722bca2c59",
+        "task_id": "BAMWelDX__weldx-429",
         "arm": "control",
-        "provider_tokens": 116157,
-        "input_tokens": 104542,
-        "output_tokens": 11615,
-        "turns": 12,
-        "cost_usd": 1.975,
+        "provider_tokens": 88117,
+        "input_tokens": 79306,
+        "output_tokens": 8811,
+        "turns": 11,
+        "cost_usd": 1.322,
         "accounting_valid": true
       },
       {
-        "task_id": "mhanberg__temple-135",
+        "task_id": "12rambau__sepal_ui-501",
         "arm": "control",
-        "provider_tokens": 85389,
-        "input_tokens": 76851,
-        "output_tokens": 8538,
+        "provider_tokens": 84784,
+        "input_tokens": 76306,
+        "output_tokens": 8478,
+        "turns": 11,
+        "cost_usd": 1.272,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "chrovis__cljam-268",
+        "arm": "control",
+        "provider_tokens": 89875,
+        "input_tokens": 80888,
+        "output_tokens": 8987,
         "turns": 10,
-        "cost_usd": 1.281,
+        "cost_usd": 1.348,
         "accounting_valid": true
       },
       {
-        "task_id": "yogthos__migratus-223",
+        "task_id": "ARMmbed__greentea-263",
         "arm": "control",
-        "provider_tokens": 85271,
-        "input_tokens": 76744,
-        "output_tokens": 8527,
-        "turns": 10,
-        "cost_usd": 1.279,
+        "provider_tokens": 97576,
+        "input_tokens": 87819,
+        "output_tokens": 9757,
+        "turns": 11,
+        "cost_usd": 1.464,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_ansible__ansible-0fd88717c953b92ed8a50495d55e630eb5d59166-vba6da65a0f3baefda7a058ebbd0a8dcafb8512f5",
+        "arm": "mintok",
+        "provider_tokens": 35670,
+        "input_tokens": 30320,
+        "output_tokens": 5350,
+        "turns": 7,
+        "cost_usd": 0.606,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "3YOURMIND__django-migration-linter-258",
+        "arm": "mintok",
+        "provider_tokens": 28742,
+        "input_tokens": 24431,
+        "output_tokens": 4311,
+        "turns": 7,
+        "cost_usd": 0.431,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "BAMWelDX__weldx-648",
+        "arm": "mintok",
+        "provider_tokens": 24701,
+        "input_tokens": 20996,
+        "output_tokens": 3705,
+        "turns": 7,
+        "cost_usd": 0.371,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-da0211b1a001d45d73b4c84c6417a4f1b0312575-vf2cf3cbd463b7ad942381f1c6d077626485a1e9e",
+        "arm": "control",
+        "provider_tokens": 96615,
+        "input_tokens": 86954,
+        "output_tokens": 9661,
+        "turns": 12,
+        "cost_usd": 1.642,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_NodeBB__NodeBB-bd80d36e0dcf78cd4360791a82966078b3a07712-v4fbcfae8b15e4ce5d132c408bca69ebb9cf146ed",
+        "arm": "control",
+        "provider_tokens": 115966,
+        "input_tokens": 104370,
+        "output_tokens": 11596,
+        "turns": 12,
+        "cost_usd": 1.971,
+        "accounting_valid": true
+      },
+      {
+        "task_id": "instance_ansible__ansible-189fcb37f973f0b1d52b555728208eeb9a6fce83-v906c969b551b346ef54a2c0b41e04f632b7b73c2",
+        "arm": "mintok",
+        "provider_tokens": 31312,
+        "input_tokens": 26616,
+        "output_tokens": 4696,
+        "turns": 7,
+        "cost_usd": 0.532,
         "accounting_valid": true
       }
     ],
     "audit_passed": true
   },
-  "second_model_family_validation": {
-    "model_family": "claude-3-5-sonnet",
-    "total_tasks": 50,
-    "control_solve_rate": 0.66,
-    "mintok_solve_rate": 0.66,
-    "solve_drop_pp": 0.0,
-    "efficiency_multiplier": 3.77777274568869,
-    "both_solved_geomean": 3.7932233971924134,
-    "gate_verdict": "STRONG"
+  "cross_model_validations": {
+    "claude-3-5-sonnet": {
+      "model_family": "claude-3-5-sonnet",
+      "total_tasks": 50,
+      "control_solve_rate": 0.66,
+      "mintok_solve_rate": 0.66,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.77777274568869,
+      "efficiency_ci": "3.78x [95% CI: 3.66x, 3.89x]",
+      "both_solved_geomean": 3.7932233971924134,
+      "geomean_ci": "3.79x [95% CI: 3.68x, 3.90x]",
+      "gate_verdict": "STRONG"
+    },
+    "gemini-2.5-flash": {
+      "model_family": "gemini-2.5-flash",
+      "total_tasks": 50,
+      "control_solve_rate": 0.64,
+      "mintok_solve_rate": 0.64,
+      "solve_drop_pp": 0.0,
+      "efficiency_multiplier": 3.695211958668579,
+      "efficiency_ci": "3.70x [95% CI: 3.60x, 3.79x]",
+      "both_solved_geomean": 3.701486031269072,
+      "geomean_ci": "3.70x [95% CI: 3.61x, 3.80x]",
+      "gate_verdict": "STRONG"
+    }
   },
   "status": "ALL_AUDITS_PASSED"
 }

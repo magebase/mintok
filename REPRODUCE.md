@@ -46,8 +46,11 @@ Expected output:
 MinTok provides frozen, fingerprint-locked evaluation windows across 4 recognized public benchmarks:
 
 ```bash
-# SWE-rebench (50 tasks)
+# SWE-rebench Window A (50 tasks)
 uv run mintok reproduce --benchmark swe-rebench
+
+# SWE-rebench Scaled Window (200 tasks / 400 trajectories)
+uv run mintok reproduce --benchmark swe-rebench-200
 
 # SWE-Bench Pro V2 (50 tasks)
 uv run mintok reproduce --benchmark swe-bench-pro-v2

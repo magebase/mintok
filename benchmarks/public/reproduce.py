@@ -26,7 +26,7 @@ def main() -> int:
     parser.add_argument(
         "--benchmark",
         default="swe-rebench",
-        choices=["swe-rebench", "swe-bench-pro-v2", "multilingual", "terminal-bench-2.0"],
+        choices=["swe-rebench", "swe-rebench-200", "swe-bench-pro-v2", "multilingual", "terminal-bench-2.0"],
         help="Benchmark dataset to reproduce",
     )
     parser.add_argument(

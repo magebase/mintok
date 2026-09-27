@@ -35,6 +35,7 @@ WINDOWS_DIR = REPO_ROOT / "benchmarks" / "public" / "windows"
 
 BENCHMARK_WINDOWS = {
     "swe-rebench": "swe_rebench_window_a.json.gz",
+    "swe-rebench-200": "swe_rebench_window_200.json.gz",
     "swe-bench-pro-v2": "swe_bench_pro_v2_window_b.json.gz",
     "multilingual": "swe_bench_multilingual_window_c.json.gz",
     "terminal-bench-2.0": "terminal_bench_window_d.json.gz",
@@ -71,7 +72,7 @@ def simulate_task_run(
     tid = task.instance_id
     hval = int(hashlib.sha256(f"{tid}:{model}".encode()).hexdigest()[:8], 16)
 
-    if bench_type == "swe-rebench":
+    if bench_type in ("swe-rebench", "swe-rebench-200"):
         solved = (hval % 100) < 64
         c_tok = 75000 + (hval % 25000)
         m_tok = int(c_tok / (3.2 + (hval % 15) / 10.0))

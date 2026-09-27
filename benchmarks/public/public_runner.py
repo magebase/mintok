@@ -69,13 +69,24 @@ def save_json(path: Path, data: Any, indent: int | None = 2) -> None:
 
 
 def fetch_swe_rebench_window(offset: int = 0, limit: int = 50) -> list[PublicBenchmarkTask]:
-    """Fetch real GitHub tasks from nebius/SWE-rebench."""
-    url = f"https://datasets-server.huggingface.co/rows?dataset=nebius%2FSWE-rebench&config=default&split=filtered&offset={offset}&limit={limit}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode())
-    raw_rows = [r["row"] for r in data.get("rows", [])]
-    return [normalize_swe_rebench_task(r) for r in raw_rows]
+    """Fetch real GitHub tasks from nebius/SWE-rebench with automatic pagination."""
+    tasks: list[PublicBenchmarkTask] = []
+    chunk_size = 100
+    curr_offset = offset
+    remaining = limit
+    while remaining > 0:
+        fetch_count = min(remaining, chunk_size)
+        url = f"https://datasets-server.huggingface.co/rows?dataset=nebius%2FSWE-rebench&config=default&split=filtered&offset={curr_offset}&limit={fetch_count}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode())
+        raw_rows = [r["row"] for r in data.get("rows", [])]
+        if not raw_rows:
+            break
+        tasks.extend([normalize_swe_rebench_task(r) for r in raw_rows])
+        curr_offset += len(raw_rows)
+        remaining -= len(raw_rows)
+    return tasks
 
 
 def fetch_swe_bench_pro_window(offset: int = 0, limit: int = 50) -> list[PublicBenchmarkTask]:
