@@ -53,6 +53,9 @@ def load_swe_rebench_window() -> list[dict[str, Any]]:
     return data["tasks"]
 
 
+REPO_CACHE_DIR = Path("/home/aqua/bench-run/repo-cache")
+
+
 def prepare_live_workspace(
     repo: str,
     base_commit: str,
@@ -64,13 +67,33 @@ def prepare_live_workspace(
     dest.mkdir(parents=True, exist_ok=True)
 
     clone_url = f"https://github.com/{repo}.git"
-    # Clone with full commit history or fetch specific ref
-    res = subprocess.run(
-        ["git", "clone", clone_url, str(dest)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    cache_repo = REPO_CACHE_DIR / repo
+
+    # If not in cache, create bare mirror clone
+    if not (cache_repo / "HEAD").exists():
+        cache_repo.parent.mkdir(parents=True, exist_ok=True)
+        print(f"  [cache] Mirroring {repo} to local cache...")
+        subprocess.run(
+            ["git", "clone", "--bare", clone_url, str(cache_repo)],
+            capture_output=True,
+            timeout=180,
+        )
+
+    if (cache_repo / "HEAD").exists():
+        res = subprocess.run(
+            ["git", "clone", str(cache_repo), str(dest)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    else:
+        res = subprocess.run(
+            ["git", "clone", clone_url, str(dest)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
     if res.returncode != 0:
         print(f"  [error] Clone failed for {repo}: {res.stderr[:200]}")
         return False
@@ -83,13 +106,9 @@ def prepare_live_workspace(
         timeout=30,
     )
     if c_res.returncode != 0:
-        # Try fetching PR ref if commit not on default branch
-        subprocess.run(
-            ["git", "fetch", "--all"],
-            cwd=dest,
-            capture_output=True,
-            timeout=60,
-        )
+        # Fetch PR ref or all branches if commit not on default branch
+        subprocess.run(["git", "remote", "set-url", "origin", clone_url], cwd=dest, capture_output=True, timeout=10)
+        subprocess.run(["git", "fetch", "--all"], cwd=dest, capture_output=True, timeout=60)
         c_res2 = subprocess.run(
             ["git", "checkout", base_commit],
             cwd=dest,
@@ -271,10 +290,57 @@ def run_live_task(
     return record, meta
 
 
+def save_live_progress(
+    ctrl_runs: list[PublicRunRecord],
+    mintok_runs: list[PublicRunRecord],
+    model: str,
+    provider: str,
+    final: bool = False,
+) -> PublicBenchmarkReport:
+    report = evaluate_paired_public_runs(
+        ctrl_runs,
+        mintok_runs,
+        compute_bootstrap=final,
+        bootstrap_resamples=1000 if final else 100,
+    )
+    out_payload = {
+        "benchmark": "swe_rebench_live",
+        "model": model,
+        "provider": provider,
+        "timestamp": time.time(),
+        "report": {
+            "total_tasks": report.total_tasks,
+            "control_solved": report.control_solved,
+            "mintok_solved": report.mintok_solved,
+            "both_solve": report.both_solve,
+            "control_only": report.control_only,
+            "mintok_only": report.mintok_only,
+            "both_fail": report.both_fail,
+            "efficiency_multiplier": report.efficiency_multiplier,
+            "both_solved_geomean": report.both_solved_geomean,
+        },
+        "control_runs": [asdict(r) for r in ctrl_runs],
+        "mintok_runs": [asdict(r) for r in mintok_runs],
+    }
+    out_file = RUNS_DIR / "swe_rebench_live_space_bunny_alpha.json"
+    scratch_out_file = SCRATCH_DIR / "swe_rebench_live_space_bunny_alpha.json"
+    saved = False
+    for p in [out_file, scratch_out_file]:
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(out_payload, f, indent=2)
+            saved = True
+            break
+        except OSError:
+            continue
+    return report
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="run_live_swe_rebench")
     parser.add_argument("--model", default="stealth/space-bunny-alpha")
-    parser.add_argument("--limit", type=int, default=5)
+    parser.add_argument("--limit", type=int, default=30)
     parser.add_argument("--provider", default="openrouter")
     parser.add_argument("--resume", action="store_true", default=True)
     args = parser.parse_args()
@@ -310,49 +376,36 @@ def main() -> None:
             else:
                 mintok_runs.append(rec)
 
-    # Evaluate paired results
-    report = evaluate_paired_public_runs(ctrl_runs, mintok_runs, compute_bootstrap=True, bootstrap_resamples=1000)
+        rep = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, final=False)
+        c_s = sum(1 for r in ctrl_runs if r.solved)
+        m_s = sum(1 for r in mintok_runs if r.solved)
+        c_tok = sum(r.provider_tokens for r in ctrl_runs)
+        m_tok = sum(r.provider_tokens for r in mintok_runs)
+        n = len(ctrl_runs)
+
+        c_t_att = c_tok / n if n else 0
+        m_t_att = m_tok / n if n else 0
+        c_t_sol = (c_tok / c_s) if c_s else 0
+        m_t_sol = (m_tok / m_s) if m_s else 0
+        c_sol_mtok = (c_s / c_tok) * 1e6 if c_tok else 0.0
+        m_sol_mtok = (m_s / m_tok) * 1e6 if m_tok else 0.0
+        ratio = (c_t_sol / m_t_sol) if (c_t_sol and m_t_sol) else 0.0
+
+        print(f"\n--- Progress [{idx}/{len(selected_tasks)}] ---")
+        print(f"  Solve Rate:                Control {c_s}/{n} ({c_s/n*100:.1f}%) | MinTok {m_s}/{n} ({m_s/n*100:.1f}%)")
+        print(f"  Tokens / Attempt:          Control {c_t_att:,.0f} | MinTok {m_t_att:,.0f}")
+        print(f"  Tokens / Solved:           Control {c_t_sol:,.0f} | MinTok {m_t_sol:,.0f}")
+        print(f"  Solves / Million Tokens:   Control {c_sol_mtok:.2f} | MinTok {m_sol_mtok:.2f}")
+        print(f"  Success / Inference Ratio: {ratio:.2f}x (both: {rep.both_solve}, ctrl_only: {rep.control_only}, min_only: {rep.mintok_only}, fail: {rep.both_fail})")
+
+    # Evaluate final paired results with full bootstrap
+    final_report = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, final=True)
 
     print("\n" + "=" * 70)
-    print("LIVE SWE-REBENCH RESULTS (GENUINE RUNS)")
+    print("LIVE SWE-REBENCH FINAL RESULTS (GENUINE RUNS)")
     print("=" * 70)
     from mintok.public_bench import render_report_table
-    print(render_report_table(report, "SWE-rebench (Live)"))
-
-    # Save live run records
-    out_payload = {
-        "benchmark": "swe_rebench_live",
-        "model": args.model,
-        "provider": args.provider,
-        "timestamp": time.time(),
-        "report": {
-            "total_tasks": report.total_tasks,
-            "control_solved": report.control_solved,
-            "mintok_solved": report.mintok_solved,
-            "both_solve": report.both_solve,
-            "control_only": report.control_only,
-            "mintok_only": report.mintok_only,
-            "both_fail": report.both_fail,
-            "efficiency_multiplier": report.efficiency_multiplier,
-            "both_solved_geomean": report.both_solved_geomean,
-        },
-        "control_runs": [asdict(r) for r in ctrl_runs],
-        "mintok_runs": [asdict(r) for r in mintok_runs],
-    }
-    out_file = RUNS_DIR / "swe_rebench_live_space_bunny_alpha.json"
-    scratch_out_file = SCRATCH_DIR / "swe_rebench_live_space_bunny_alpha.json"
-    saved_path = None
-    for p in [out_file, scratch_out_file]:
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(out_payload, f, indent=2)
-            saved_path = p
-            break
-        except OSError:
-            continue
-    if saved_path:
-        print(f"\n[Saved live run records to {saved_path}]")
+    print(render_report_table(final_report, "SWE-rebench (Live)"))
 
 
 if __name__ == "__main__":
