@@ -783,3 +783,16 @@ run: the control-arm token rows read "—" in the live report (data is in
 the score sidecars; the table loader needs them wired), and the
 provider tok/solved row mis-sums (offline recompute from the usage
 sidecars is the source of truth).
+
+### Fresh holdout suite generation and integrity freeze (40 tasks)
+
+As pre-registered, to prevent over-tuning on the 15-task `biglib` dev set, a fresh
+40-task holdout benchmark suite has been generated, statically fingerprinted, and
+frozen prior to evaluating any model outcomes.
+
+- **Repositories**: 4 independent synthetic domain repos (`ledger`, `inventory`, `dispatch`, `metrics`), each with a 1,033 LOC `large.py` module exceeding the router's `LARGE_MODULE_LOC = 1000` threshold.
+- **Tasks**: 40 tasks (`tasks_holdout.json`) across 10 bug template families (`strip`, `threshold`, `bound`, `round`, `case`, `default`, `slice`, `join`, `count`, `normalize`), targeting primary domain functions with completely fresh wording.
+- **Static Integrity**: Fingerprints for all 40 tasks computed and committed to `holdout_fingerprints.json` (SHA-256 over repo state + task spec).
+- **Validation**: 100% passing (`gen_holdout.py --validate` passes with 0 failures: all 40 tasks fail on pristine, pristine test suites pass, reference fixes apply cleanly and pass checker, test suites remain green).
+- **Runner Integration**: `run_bench.py promote-large --holdout` supports paired holdout evaluation with automated holdout gate checks. Tested and verified via mock dry run.
+
