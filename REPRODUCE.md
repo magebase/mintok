@@ -17,6 +17,9 @@ To maintain strict scientific and evaluation discipline, we distinguish between 
 
 ## 2. Quick Turnkey Reproduction (< 1 Minute)
 
+> [!NOTE]
+> `mintok reproduce` executes the **offline calibrated simulation model** by default, allowing external auditors to verify accounting integrity, window fingerprints, and bootstrap mathematics deterministically and free of API costs. For live model execution on genuine GitHub checkouts, see Section 4.
+
 To verify the entire reproduction pipeline, cryptographic fingerprints, arm-order balancing, and paired bootstrap statistics immediately without requiring external API keys:
 
 ```bash

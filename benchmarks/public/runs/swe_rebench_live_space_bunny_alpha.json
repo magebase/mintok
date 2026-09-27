@@ -1,0 +1,45 @@
+{
+  "benchmark": "swe_rebench_live",
+  "model": "stealth/space-bunny-alpha",
+  "provider": "openrouter",
+  "timestamp": 1790512624.1265073,
+  "report": {
+    "total_tasks": 1,
+    "control_solved": 0,
+    "mintok_solved": 1,
+    "both_solve": 0,
+    "control_only": 0,
+    "mintok_only": 1,
+    "both_fail": 0,
+    "efficiency_multiplier": 0.0,
+    "both_solved_geomean": 1.0
+  },
+  "control_runs": [
+    {
+      "task_id": "0b01001001__spectree-64",
+      "arm": "control",
+      "solved": false,
+      "provider_tokens": 209832,
+      "input_tokens": 205774,
+      "output_tokens": 4058,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "0b01001001/spectree",
+      "category": "python"
+    }
+  ],
+  "mintok_runs": [
+    {
+      "task_id": "0b01001001__spectree-64",
+      "arm": "mintok",
+      "solved": true,
+      "provider_tokens": 315643,
+      "input_tokens": 295982,
+      "output_tokens": 19661,
+      "turns": 25,
+      "cost_usd": 0,
+      "repo": "0b01001001/spectree",
+      "category": "python"
+    }
+  ]
+}
