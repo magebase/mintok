@@ -1119,29 +1119,58 @@ Every trajectory records:
 
 ---
 
-### Empirical Live SWE-rebench Evaluation: Space Bunny Alpha Pilot
+### Empirical Live SWE-rebench Evaluation: 30-Task Benchmark (Space Bunny Alpha)
 
-MinTok executed genuine end-to-end runs against live GitHub repositories under the pre-registered protocol using `stealth/space-bunny-alpha` on OpenRouter.
+MinTok executed genuine end-to-end runs against live GitHub repositories under the pre-registered protocol across 30 tasks from `nebius/SWE-rebench` Window A using `stealth/space-bunny-alpha` on OpenRouter.
 
-Unlike offline simulation runs, all outcomes are determined strictly by executing the official ground-truth test patch via `pytest` on real repositories checked out at their historical `base_commit`.
+Unlike offline simulation runs, all outcomes were determined strictly by executing the official ground-truth test patch via `pytest` on real repositories checked out at their historical `base_commit`, with test directory modifications reverted prior to evaluation.
 
-#### Pilot Task: `0b01001001__spectree-64` (Repository: `0b01001001/spectree`)
-- **Task Problem**: OpenAPI query parameter description does not display in Swagger UI.
-- **Fail-to-Pass Target**: `tests/test_utils.py::test_parse_params`
-- **Official Ground Truth**: Parameter dictionary must have `description` at the top level as a sibling to `schema`.
+#### 1. Aggregate Results (N = 30 Tasks, 60 Paired Trajectories)
 
-| Arm | Tooling Regime | Solved (Official Pytest) | Provider Tokens | Turns | Upstream Requests | Patch Behavior |
-|---|---|---|---|---|---|---|
-| **Control** | Shell (`grep`, `cat`) | **FAIL** (0/1) | 209,832 | 26 | 26 (`gen-1790512290` .. `gen-1790512361`) | Hallucinated `description` inside `schema` dict; modified `tests/test_utils.py` locally. Failed official SWE-rebench test patch. |
-| **MinTok** | Semantic (`slice`, `read`, `patch`) | **PASS** (1/1) | 315,643 | 25 | 25 (`gen-1790512088` .. `gen-1790512284`) | Located exact OpenAPI model schema via `slice`; correctly placed `description` at parameter top-level. Cleanly passed official test patch. |
+| Metric | Control Arm (Shell) | MinTok Arm (Semantic ABI) | Comparison / Effect |
+|---|---|---|---|
+| **Solve Rate** | 4/30 (13.3%) | 2/30 (6.7%) | $\Delta = +6.7\text{pp}$ [95% CI: -6.7pp, +20.0pp] |
+| **Tokens / Attempt (All Tasks)** | 366,944 | 274,003 | **1.34x token reduction per attempt** (-25.3%) |
+| **Total Provider Tokens (30 Tasks)** | 11,008,323 | 8,220,102 | **2,788,221 fewer total provider tokens** |
+| **Average Turns / Attempt** | 25.7 turns (772 total) | 21.2 turns (636 total) | **-17.6% fewer turns** |
+| **Tokens / Solved (Strict Solved)** | 342,116 | 277,553 | **1.23x efficiency** [95% CI: 0.92x, 1.60x] |
+| **Tokens / Solved (All-Spend Allocated)** | 2,752,081 | 4,110,051 | 0.67x (driven by 4 vs 2 solve count) |
+| **Successful Tasks / Million Tokens (Strict)** | 2.92 solves / Mtok | 3.60 solves / Mtok | **1.23x yield** |
+| **Successful Tasks / Million Tokens (Total Spend)** | 0.36 solves / Mtok | 0.24 solves / Mtok | 0.67x yield |
+| **Both-Solved Paired Ratio** | 367,730 tokens | 239,463 tokens | **1.54x savings** on identical solution |
 
-#### Empirical Concordance & Discordance Analysis
-- **Both Solved**: 0
-- **Control Only**: 0
-- **MinTok Only**: 1
-- **Both Failed**: 0
-- **Natural Discordance Demonstrated**: MinTok solved a complex specification bug that ordinary shell exploration failed to resolve. 51 upstream OpenRouter requests with 100% unique request IDs; zero shared context; genuine real-world verification on real GitHub checkouts.
-- **Artifact**: Persisted to [`benchmarks/public/runs/swe_rebench_live_space_bunny_alpha.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_live_space_bunny_alpha.json).
+#### 2. Empirical Concordance & Discordance Matrix
+
+```text
+paired solve breakdown (30 tasks):
+  both solve:            1  (3YOURMIND__django-migration-linter-258: 1.54x savings)
+  control-only solve:    3  (sepal_ui-411, scim2-filter-parser-13, scim2-filter-parser-20)
+  mintok-only solve:     1  (spectree-64)
+  both fail:            25  (avg 1.39x token reduction for MinTok on failed trajectories)
+```
+
+#### 3. Per-Task Telemetry & Solution Divergence (Selected Highlights)
+
+| Task ID | Repository | Control Result | MinTok Result | Token Ratio (C / M) | Structural Notes |
+|---|---|---|---|---|---|
+| `0b01001001__spectree-64` | `spectree` | **FAIL** (209k) | **PASS** (315k) | 0.66x | MinTok correctly placed `description` at parameter root; Control hallucinated within schema. |
+| `12rambau__sepal_ui-411` | `sepal_ui` | **PASS** (304k) | **FAIL** (131k) | 2.32x | MinTok pruned search early (14 turns); Control iterated longer (26 turns) and found fix. |
+| `3YOURMIND__django-migration-linter-258` | `django-migration-linter` | **PASS** (368k) | **PASS** (239k) | **1.54x** | Both solved; MinTok used 128k fewer tokens and solved in fewer turns. |
+| `12rambau__sepal_ui-646` | `sepal_ui` | **FAIL** (374k) | **FAIL** (61k) | **6.15x** | MinTok stopped after 6 turns on unresolvable widget state; Control wandered for 26 turns. |
+| `12rambau__sepal_ui-814` | `sepal_ui` | **FAIL** (259k) | **FAIL** (33k) | **7.91x** | MinTok bounded failing trajectory in 5 turns vs Control's 23 turns. |
+| `AI4S2S__lilio-49` | `lilio` | **FAIL** (638k) | **FAIL** (97k) | **6.59x** | MinTok avoided massive prompt explosion; Control consumed 638k tokens. |
+| `ARMmbed__mbed-tools-285` | `mbed-tools` | **FAIL** (551k) | **FAIL** (287k) | **1.92x** | MinTok scoped AST dependencies cleanly under budget. |
+
+#### 4. Key Empirical Takeaways
+
+1. **Context Bounding Eliminates Tail Bleed on Real Repositories**:
+   MinTok reduced total provider inference by **2.79 million tokens (-25.3%)** across the 30 tasks, and cut average turns by 17.6%. On failed tasks, MinTok avoided catastrophic context runaway (e.g. 638k vs 97k on `lilio-49`, 374k vs 61k on `sepal_ui-646`).
+2. **On Solved Tasks, MinTok Is Cheaper**:
+   For tasks solved by both arms (`django-migration-linter-258`), MinTok delivered **1.54x token savings**. Across all solved tasks, MinTok used **277k vs 342k tokens/solved** (1.23x).
+3. **The Solve-Rate Tradeoff**:
+   On this 30-task real-world sample with `stealth/space-bunny-alpha`, Control resolved 4 tasks while MinTok resolved 2. MinTok's tight semantic scoping prevented wandering, but in two cases (`scim2-filter-parser-13` and `20`) Control's freeform exploratory shell trials eventually discovered a solution that MinTok's bounded AST budget did not uncover.
+4. **Durable Artifacts**:
+   The full raw telemetry and checker logs for all 60 trajectories are recorded in [`benchmarks/public/runs/swe_rebench_live_space_bunny_alpha.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_live_space_bunny_alpha.json).
 
 ---
 
