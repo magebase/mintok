@@ -23,9 +23,32 @@ HARNESS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HARNESS_ROOT / "benchmarks" / "e2e"))
 sys.path.insert(0, str(HARNESS_ROOT / "src"))
 
+from mintok.escalation import EscalationController, EscalationLevel, TrajectoryEvent  # noqa: E402
 from model_runner import run_turn  # noqa: E402
 
 AGENT_CLI = Path(__file__).resolve().parent / "agent_cli.py"
+
+
+def _load_controller(log_path: Path) -> EscalationController:
+    controller = EscalationController()
+    if log_path.exists():
+        for line in log_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                e = json.loads(line)
+                controller.record_event(
+                    TrajectoryEvent(
+                        tool=e.get("tool", ""),
+                        args=e.get("args"),
+                        output=str(e.get("output", "")),
+                        exit_code=e.get("exit_code", 0),
+                        tokens=e.get("package_tokens", e.get("tokens", 0)),
+                    )
+                )
+            except Exception:
+                continue
+    return controller
 
 
 def _empty_usage() -> dict:
@@ -63,6 +86,16 @@ DISCIPLINE = {
         "Edit with patch(file, start, end) — the slice gives you the line "
         "ranges. Run the suite tool to verify, then reply with a short summary "
         "and no tool call."
+    ),
+    "adaptive": (
+        "You are an expert engineer working in a copy of a Python repository. "
+        "Solve the task using MinTok adaptive tooling. "
+        "Start with the slice tool to find candidate source locations. "
+        "Read exact regions with read(path, start, end) and edit with patch(file, start, end, source). "
+        "If slice was too narrow, use broaden. If a test fails with a traceback, use trace_slice. "
+        "If you cannot find a file or want to locate definitions, use find_files or grep. "
+        "Verify your changes with the suite tool before finishing. "
+        "When the suite passes and you are done, reply with a short summary and no tool call."
     ),
 }
 
@@ -116,6 +149,107 @@ TOOL_SCHEMAS = {
             "input_schema": {"type": "object", "properties": {}},
         },
     ],
+    "adaptive": [
+        {
+            "name": "slice",
+            "description": (
+                "Ranked exact source regions for a description of what to find "
+                "or change. Returns file:line regions plus excerpts under a "
+                "token budget."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "what to find or change, in plain words"},
+                },
+                "required": ["description"],
+            },
+        },
+        {
+            "name": "broaden",
+            "description": "Expanded source regions with wider token budget when slice was too narrow.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "description for expanded search"},
+                },
+                "required": ["description"],
+            },
+        },
+        {
+            "name": "trace_slice",
+            "description": "Slice source around the failing frame of a test traceback.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "optional file:line target frame"},
+                },
+            },
+        },
+        {
+            "name": "find_files",
+            "description": "Find files in repository matching a glob pattern (e.g. '*parser*' or '*.lark').",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "glob pattern"},
+                },
+            },
+        },
+        {
+            "name": "grep",
+            "description": "Grep for text or regex across repository source files.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "regex or string pattern to search"},
+                    "path": {"type": "string", "description": "optional subpath to limit search"},
+                },
+                "required": ["pattern"],
+            },
+        },
+        {
+            "name": "read",
+            "description": "Bounded raw-file region read (fallback; tracked).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "start": {"type": "integer"},
+                    "end": {"type": "integer"},
+                },
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "patch",
+            "description": "Replace a 1-based inclusive line range with new source.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "start": {"type": "integer"},
+                    "end": {"type": "integer"},
+                    "source": {"type": "string", "description": "replacement lines"},
+                },
+                "required": ["file", "start", "end", "source"],
+            },
+        },
+        {
+            "name": "suite",
+            "description": "Run the task copy's full test suite.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "shell",
+            "description": "Run a shell command in the task root (unlocked when escalation level 4 is reached).",
+            "input_schema": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+    ],
     "control": [
         {
             "name": "shell",
@@ -148,6 +282,24 @@ def execute_tool(root: Path, log: Path, policy: str, name: str, args: dict) -> t
             stdin = None
         elif name == "slice":
             cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "slice", args["description"]]
+            stdin = None
+        elif name == "broaden":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "broaden", args["description"]]
+            stdin = None
+        elif name == "trace_slice":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "trace_slice"]
+            if args.get("target"):
+                cmd.append(str(args["target"]))
+            stdin = None
+        elif name == "find_files":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "find_files"]
+            if args.get("pattern"):
+                cmd.append(str(args["pattern"]))
+            stdin = None
+        elif name == "grep":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "grep", str(args["pattern"])]
+            if args.get("path"):
+                cmd.extend(["--path", str(args["path"])])
             stdin = None
         elif name == "read":
             cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "read", args["path"]]
@@ -219,6 +371,7 @@ def run_loop(
     nudged = False
     forced_verify = False
     budget = max_turns
+    current_level = EscalationLevel.SLICE_BOUNDED
     while not completed:
         remaining = budget - turns
         if remaining <= 0:
@@ -239,9 +392,27 @@ def run_loop(
                 "content": "[harness] turn budget nearly exhausted with unverified edits. "
                 "Run the suite now; stop when it passes.",
             })
+        if policy == "adaptive":
+            ctrl = _load_controller(log)
+            active_names = set(ctrl.active_tools())
+            turn_tools = [t for t in TOOL_SCHEMAS["adaptive"] if t["name"] in active_names]
+            if ctrl.level > current_level:
+                current_level = ctrl.level
+                if ctrl.level == EscalationLevel.TARGETED_DISCOVERY:
+                    messages.append({
+                        "role": "user",
+                        "content": "[harness] Escalation Level 3 reached: targeted discovery tools (find_files, grep) are now unlocked to locate files.",
+                    })
+                elif ctrl.level == EscalationLevel.FULL_FALLBACK:
+                    messages.append({
+                        "role": "user",
+                        "content": "[harness] Escalation Level 4 reached: stagnation detected. Unrestricted shell is now unlocked to diagnose and fix the issue directly.",
+                    })
+        else:
+            turn_tools = tools
         started = time.monotonic()
         if completion is not None:
-            stop, blocks, usage = completion(model, system, messages, tools=tools)[:3]
+            stop, blocks, usage = completion(model, system, messages, tools=turn_tools)[:3]
             meta = {}
         else:
             from model_runner import build_request, _urllib_transport, resolve_api_key
@@ -250,7 +421,7 @@ def run_loop(
             # build_request flattens internal blocks to the provider wire
             # exactly once; pre-flattening here would strip tool_call_id.
             url, headers, body = build_request(
-                provider, model, system, messages, api_key, tools=tools, generation=generation
+                provider, model, system, messages, api_key, tools=turn_tools, generation=generation
             )
             payload = None
             for attempt in range(8):  # free-tier upstreams overload for minutes
@@ -278,6 +449,16 @@ def run_loop(
         turns += 1
         calls = [b for b in blocks if b.get("type") == "tool_use"]
         if not calls or stop != "tool_use":
+            if dirty and turns < budget:
+                out, _code = execute_tool(root, log, policy, "suite", {})
+                dirty = False
+                messages.append({"role": "assistant", "content": blocks})
+                messages.append({
+                    "role": "user",
+                    "content": f"[harness] Verification check (you stopped with unverified edits):\n{out}\n"
+                    "If tests failed, fix them. If tests passed, summarize your fix and finish with no tool call.",
+                })
+                continue
             completed = True
             break
         results = []

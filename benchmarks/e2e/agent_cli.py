@@ -52,6 +52,13 @@ sys.path.insert(0, str(HARNESS_ROOT / "src"))
 
 from mintok.abi import AgentABI  # noqa: E402
 from mintok.continuity import LearnedState, file_digests  # noqa: E402
+from mintok.escalation import (  # noqa: E402
+    EscalationController,
+    EscalationLevel,
+    TrajectoryEvent,
+    extract_traceback_target,
+)
+from mintok.slicer import EXPANDED_BUDGET  # noqa: E402
 from mintok.slicer import INITIAL_BUDGET as INITIAL_SLICE_BUDGET  # noqa: E402
 from mintok.tokens import estimate_tokens  # noqa: E402
 
@@ -131,6 +138,25 @@ POLICIES: dict[str, dict] = {
         "tools": {"slice", "read", "patch", "suite"},
         "ops": set(),
         "breaker": False,
+    },
+    # adaptive: MinTok 2.0 progressive escalation controller. Starts with
+    # precision slice, broadens context if blind, and unlocks targeted
+    # discovery and full shell fallback when stagnation is detected.
+    "adaptive": {
+        "tools": {
+            "slice",
+            "broaden",
+            "trace_slice",
+            "find_files",
+            "grep",
+            "read",
+            "patch",
+            "suite",
+            "shell",
+        },
+        "ops": set(),
+        "breaker": False,
+        "escalation": True,
     },
 }
 
@@ -252,6 +278,19 @@ def main(argv: list[str] | None = None) -> int:
     slc = sub.add_parser("slice", help="ranked exact source regions for a task description (arm S)")
     slc.add_argument("description", help="what to find/change, in task words")
 
+    broaden = sub.add_parser("broaden", help="expanded source regions with wider budget (arm adaptive)")
+    broaden.add_argument("description", help="what to find/change, in task words")
+
+    trace = sub.add_parser("trace_slice", help="slice around test failure traceback or target (arm adaptive)")
+    trace.add_argument("target", nargs="?", default=None, help="optional file:line target frame")
+
+    find_f = sub.add_parser("find_files", help="find files in repo matching pattern (arm adaptive)")
+    find_f.add_argument("pattern", nargs="?", default="*", help="glob pattern, e.g. *parser*")
+
+    grep_p = sub.add_parser("grep", help="grep pattern in repo source files (arm adaptive)")
+    grep_p.add_argument("pattern", help="text or regex pattern")
+    grep_p.add_argument("--path", default=None, help="subpath to search within")
+
     args = parser.parse_args(argv)
     policy = POLICIES.get(args.policy)
     if policy is None:
@@ -274,15 +313,46 @@ def main(argv: list[str] | None = None) -> int:
         print(output)
         return exit_code
 
+    def load_controller() -> EscalationController:
+        controller = EscalationController()
+        if args.log.exists():
+            for line in args.log.read_text().splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                    controller.record_event(
+                        TrajectoryEvent(
+                            tool=e.get("tool", ""),
+                            args=e.get("args"),
+                            output=str(e.get("output", "")),
+                            exit_code=e.get("exit_code", 0),
+                            tokens=e.get("package_tokens", e.get("tokens", 0)),
+                        )
+                    )
+                except Exception:
+                    continue
+        return controller
+
     def gated(tool: str) -> bool:
         """True when the policy allows this tool right now."""
+        if policy.get("escalation"):
+            ctrl = load_controller()
+            return tool in ctrl.active_tools()
         if tool == "shell" and policy["breaker"]:
             return tripped(breaker_state(args.log))
-        return tool in policy["tools"] or (tool == "query" and args.op in policy["ops"])
+        return tool in policy["tools"] or (tool == "query" and getattr(args, "op", None) in policy["ops"])
 
     if args.tool == "shell":
         entry["args"] = args.command
         if not gated("shell"):
+            if policy.get("escalation"):
+                ctrl = load_controller()
+                return finish(
+                    f"locked: shell is locked at Level {ctrl.level.value} ({ctrl.level.name}); "
+                    "unlocks upon stagnation or repeated test failures",
+                    3,
+                )
             state = breaker_state(args.log)
             return finish(f"locked: {breaker_report(state)}", 3)
         if re.search(r"(holdout_solutions|tasks_holdout|\.\./)", args.command):
@@ -502,9 +572,12 @@ def main(argv: list[str] | None = None) -> int:
         return finish(output, 0)
 
     if args.tool == "suite":
-        env = {"PATH": "/usr/bin:/bin:/usr/local/bin", "PYTHONPATH": str(args.root / "src")}
+        env = dict(os.environ)
+        src_dirs = [args.root, args.root / "src"]
+        env["PYTHONPATH"] = ":".join(str(p) for p in src_dirs if p.exists())
+        pytest_bin = "/home/aqua/.local/bin/pytest" if Path("/home/aqua/.local/bin/pytest").exists() else "pytest"
         proc = subprocess.run(
-            [str(VENV_PY), "-m", "pytest", "-q"] + (["--no-header", "-x"] if args.quiet else []),
+            [pytest_bin, "-q"] + (["--no-header", "-x"] if args.quiet else []),
             cwd=args.root,
             env=env,
             capture_output=True,
@@ -527,6 +600,112 @@ def main(argv: list[str] | None = None) -> int:
         entry["budget"] = pkg.budget
         entry["expanded"] = pkg.budget > INITIAL_SLICE_BUDGET
         return finish(pkg.text, 0)
+
+    if args.tool == "broaden":
+        entry["args"] = args.description
+        if not gated("broaden"):
+            return finish(f"locked: tool 'broaden' not in policy {args.policy}", 3)
+        try:
+            from mintok.slicer import slice_task
+
+            pkg = slice_task(args.root, args.description, initial_budget=EXPANDED_BUDGET, expanded_budget=3000)
+        except Exception as exc:  # noqa: BLE001 - the agent sees the failure
+            return finish(f"error: {exc}", 1)
+        entry["package_tokens"] = pkg.tokens
+        entry["budget"] = pkg.budget
+        entry["expanded"] = True
+        return finish(pkg.text, 0)
+
+    if args.tool == "trace_slice":
+        entry["args"] = args.target
+        if not gated("trace_slice"):
+            return finish(f"locked: tool 'trace_slice' not in policy {args.policy}", 3)
+        target = args.target
+        if not target and args.log.exists():
+            for line in reversed(args.log.read_text().splitlines()):
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                    if e.get("tool") in ("suite", "verify") and e.get("exit_code", 0) != 0:
+                        frame = extract_traceback_target(str(e.get("output", "")))
+                        if frame:
+                            target = f"{frame[0]}:{frame[1]}"
+                            break
+                except Exception:
+                    continue
+        if not target:
+            return finish("error: no traceback target specified and no failing test found in log", 1)
+        parts = target.split(":", 1)
+        rel_path = parts[0]
+        lineno = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 1
+        target_file = (args.root / rel_path).resolve()
+        try:
+            target_file.relative_to(args.root.resolve())
+        except ValueError:
+            return finish("locked: trace_slice target escapes task root", 3)
+        if not target_file.is_file():
+            return finish(f"error: target file not found {rel_path}", 1)
+        lines = target_file.read_text().splitlines()
+        start = max(1, lineno - 30)
+        end = min(len(lines), lineno + 30)
+        excerpts = "\n".join(f"{i}  {lines[i - 1]}" for i in range(start, end + 1))
+        output = f"trace target: {rel_path}:{start}-{end} (failing line {lineno})\n--- excerpts ---\n{excerpts}"
+        return finish(output, 0)
+
+    if args.tool == "find_files":
+        entry["args"] = args.pattern
+        if not gated("find_files"):
+            return finish(f"locked: tool 'find_files' not in policy {args.policy}", 3)
+        import fnmatch
+
+        pat = args.pattern or "*"
+        matches = []
+        ignored = {".git", "__pycache__", ".venv", ".tox", "build", "dist", ".pytest_cache", ".eggs"}
+        for p in sorted(args.root.rglob("*")):
+            if any(part in ignored for part in p.parts):
+                continue
+            if p.is_file():
+                rel = str(p.relative_to(args.root))
+                if fnmatch.fnmatch(rel, pat) or fnmatch.fnmatch(p.name, pat):
+                    matches.append(rel)
+                    if len(matches) >= 50:
+                        break
+        if not matches:
+            return finish(f"no files found matching '{pat}'", 0)
+        return finish("\n".join(matches[:50]), 0)
+
+    if args.tool == "grep":
+        entry["args"] = {"pattern": args.pattern, "path": args.path}
+        if not gated("grep"):
+            return finish(f"locked: tool 'grep' not in policy {args.policy}", 3)
+        search_root = (args.root / args.path).resolve() if args.path else args.root.resolve()
+        try:
+            search_root.relative_to(args.root.resolve())
+        except ValueError:
+            return finish("locked: grep path escapes the task root", 3)
+        hits = []
+        ignored = {".git", "__pycache__", ".venv", ".tox", "build", "dist", ".pytest_cache", ".eggs"}
+        pat_re = re.compile(args.pattern, re.IGNORECASE)
+        candidates = sorted(search_root.rglob("*.py")) if search_root.is_dir() else [search_root]
+        for p in candidates:
+            if any(part in ignored for part in p.parts):
+                continue
+            if p.is_file():
+                try:
+                    rel = str(p.relative_to(args.root))
+                    for idx, line in enumerate(p.read_text(errors="ignore").splitlines(), 1):
+                        if pat_re.search(line):
+                            hits.append(f"{rel}:{idx}: {line.strip()[:120]}")
+                            if len(hits) >= 40:
+                                break
+                except Exception:
+                    continue
+            if len(hits) >= 40:
+                break
+        if not hits:
+            return finish(f"no hits for '{args.pattern}'", 0)
+        return finish("\n".join(hits[:40]), 0)
 
     if args.tool == "verify":
         entry["args"] = " ".join(args.argv)

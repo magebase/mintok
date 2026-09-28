@@ -1,0 +1,145 @@
+{
+  "benchmark": "swe_rebench_live",
+  "model": "stealth/space-bunny-alpha",
+  "provider": "openrouter",
+  "run_name": "swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive",
+  "timestamp": 1790582012.0904753,
+  "report": {
+    "total_tasks": 5,
+    "control_solved": 3,
+    "mintok_solved": 3,
+    "both_solve": 2,
+    "control_only": 1,
+    "mintok_only": 1,
+    "both_fail": 1,
+    "efficiency_multiplier": 1.2564808503743419,
+    "both_solved_geomean": 1.404090680570862,
+    "control_solves_per_mtok": 1.5686733833775002,
+    "mintok_solves_per_mtok": 1.6187952925432891,
+    "economic_yield_multiplier": 1.0319517814842194
+  },
+  "control_runs": [
+    {
+      "task_id": "ASFHyP3__hyp3-sdk-71",
+      "arm": "control",
+      "solved": true,
+      "provider_tokens": 301443,
+      "input_tokens": 295933,
+      "output_tokens": 5510,
+      "turns": 21,
+      "cost_usd": 0,
+      "repo": "ASFHyP3/hyp3-sdk",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-696",
+      "arm": "control",
+      "solved": true,
+      "provider_tokens": 368769,
+      "input_tokens": 362562,
+      "output_tokens": 6207,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-798",
+      "arm": "control",
+      "solved": false,
+      "provider_tokens": 555541,
+      "input_tokens": 552018,
+      "output_tokens": 3523,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-863",
+      "arm": "control",
+      "solved": false,
+      "provider_tokens": 418592,
+      "input_tokens": 410560,
+      "output_tokens": 8032,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-875",
+      "arm": "control",
+      "solved": true,
+      "provider_tokens": 268099,
+      "input_tokens": 263732,
+      "output_tokens": 4367,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    }
+  ],
+  "mintok_runs": [
+    {
+      "task_id": "ASFHyP3__hyp3-sdk-71",
+      "arm": "mintok",
+      "solved": true,
+      "provider_tokens": 188221,
+      "input_tokens": 182823,
+      "output_tokens": 5398,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASFHyP3/hyp3-sdk",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-696",
+      "arm": "mintok",
+      "solved": true,
+      "provider_tokens": 299572,
+      "input_tokens": 289451,
+      "output_tokens": 10121,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-798",
+      "arm": "mintok",
+      "solved": false,
+      "provider_tokens": 635408,
+      "input_tokens": 629441,
+      "output_tokens": 5967,
+      "turns": 25,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-863",
+      "arm": "mintok",
+      "solved": true,
+      "provider_tokens": 258984,
+      "input_tokens": 254711,
+      "output_tokens": 4273,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    },
+    {
+      "task_id": "ASPP__pelita-875",
+      "arm": "mintok",
+      "solved": false,
+      "provider_tokens": 471045,
+      "input_tokens": 464330,
+      "output_tokens": 6715,
+      "turns": 26,
+      "cost_usd": 0,
+      "repo": "ASPP/pelita",
+      "category": "python"
+    }
+  ]
+}

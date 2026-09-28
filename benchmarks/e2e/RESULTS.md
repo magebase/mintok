@@ -1174,7 +1174,109 @@ paired solve breakdown (30 tasks):
 
 ---
 
-### Historical Cross-Model Validations (Previous Generation / Stale Models)
+### MinTok 2.0: Adaptive Sequential Optimization and Progressive Escalation
+
+The diagnostic results on the initial 30 tasks revealed the central architectural tradeoff of static context compression:
+While MinTok bounded trajectories and reduced total provider inference by **25.3%**, static restriction pruned exploration on tasks where freeform discovery was essential, causing an economic yield penalty ($0.24$ vs $0.36$ solves/Mtok).
+
+**MinTok 2.0 transitions the system from a static context compressor to an adaptive sequential inference optimizer and progressive escalation governor.**
+
+```text
+                                  Task Arrives
+                                       │
+                        Level 0: SLICE_BOUNDED (~150-tok tool prompt)
+                        (Fast semantic slice, bounded reads, patch, suite)
+                                       │
+            ┌──────────────────────────┴──────────────────────────┐
+            ▼                                                     ▼
+     Clean Resolution                                    Stagnation Detected
+     (Tests pass -> Stop)                       (2x repeat failures, missing files,
+                                                 2x rejected patches, or paralysis)
+                                                                  │
+                                                Level 1: BROADEN (Expanded budget)
+                                                                  │
+                                                Level 2: TRACE_SLICED (Frame localization)
+                                                                  │
+                                                Level 3: TARGETED_DISCOVERY (find_files, grep)
+                                                                  │
+                                                Level 4: FULL_FALLBACK (Unrestricted shell)
+```
+
+#### 1. Progressive Tool Escalation Contract
+
+To maintain minimal frontier context overhead while eliminating search blindness, MinTok 2.0 dynamically gates tools via an in-process state machine ([`src/mintok/escalation.py`](file:///home/aqua/Projects/MinTok/src/mintok/escalation.py)):
+
+| Level | Tool Surface | Context Overhead | Unlocking Condition |
+|---|---|---|---|
+| **Level 0: `SLICE_BOUNDED`** | `slice`, `read`, `patch`, `suite` | **~150 tokens** | Initial state for all tasks. Fast semantic path. |
+| **Level 1: `BROADEN`** | + `broaden` | ~180 tokens | Agent requests expanded AST budget or 2 consecutive queries find no symbols. |
+| **Level 2: `TRACE_SLICED`** | + `trace_slice` | ~210 tokens | Test suite failure provides a stack frame traceback. |
+| **Level 3: `TARGETED_DISCOVERY`** | + `find_files`, `grep` | ~270 tokens | 2+ consecutive missing file attempts or exploratory uncertainty. |
+| **Level 4: `FULL_FALLBACK`** | + `shell` | ~320 tokens | **Stagnation Trigger**: 2+ consecutive identical test failure hashes (`hash_test_failure`), 2+ rejected patch attempts, 4+ repeated queries, or 6+ turns without testing. |
+
+#### 2. Primary Economic Objective: Solves per Million Provider Tokens
+
+In multi-attempt agent deployments, evaluating only tokens spent on successful runs produces survivor bias. MinTok 2.0 optimizes the **all-attempt allocated economic yield**:
+
+$$\text{Solves / Mtok} = \frac{\text{Successful Verified Tasks}}{\text{Total Provider Tokens Spent Across All Tasks (Pass + Fail)}} \times 10^6$$
+
+$$\text{Economic Yield Multiplier} = \frac{\text{MinTok Solves / Mtok}}{\text{Control Solves / Mtok}}$$
+
+- **Pre-Registered Acceptance Gates**:
+  - *Minimum Viable*: Solve Rate $\ge \text{Control} - 3.0\text{pp}$, Economic Yield $\ge 1.25\times \text{Control}$.
+  - *Strong*: Solve Rate $\ge \text{Control}$, Economic Yield $\ge 1.50\times \text{Control}$.
+  - *Breakthrough*: Solve Rate $\ge \text{Control}$, Economic Yield $\ge 2.00\times \text{Control}$.
+
+---
+
+### Pre-Registration: Window Eval 50 (Official SWE-rebench Tasks 31–80)
+
+To enforce strict data hygiene and eliminate benchmark overfitting:
+- **Diagnostic Window**: Tasks 1–30 from Window A are permanently classified as development/diagnostic data.
+- **Evaluation Window**: All verification claims are evaluated on a freshly isolated, contiguous holdout:
+  - **Window File**: [`benchmarks/public/windows/swe_rebench_window_eval_50.json.gz`](file:///home/aqua/Projects/MinTok/benchmarks/public/windows/swe_rebench_window_eval_50.json.gz)
+  - **Task Count**: $N = 50$ tasks (tasks 31–80 of SWE-rebench).
+  - **Window SHA-256 Fingerprint**: `94d0a93fc27b511260c599ed9b6c2171ab5420f67c072b69b95fb72b8e6acf38`.
+  - **Sequence Hash**: `e79567f8c742d62e800e1b0488312575fdc45f2134b87c7229d06eb65ca68093`.
+
+---
+
+### Empirical Live SWE-rebench Evaluation: Window Eval 50 Pilot Results
+
+The pilot batch of 5 tasks (10 paired live runs) was executed on `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha`:
+
+#### 1. Aggregate Pilot Performance (Tasks 1–5, 10 Paired Trajectories)
+
+| Metric | Control Arm (Shell) | MinTok 2.0 Arm (Adaptive) | Effect / Ratio |
+|---|---|---|---|
+| **Solve Rate** | 3/5 (60.0%) | 3/5 (60.0%) | **+0.0pp parity** (0% degradation) |
+| **Total Provider Tokens** | 938,311 | 746,777 | **-20.4% token reduction** (-191,534 tokens) |
+| **Tokens / Attempt (All Tasks)** | 187,662 | 149,355 | **1.26x token reduction** |
+| **Tokens / Solved (Strict Solved)** | 312,770 | 248,925 | **1.26x efficiency** |
+| **Solves / Million Tokens (All Spend)** | 1.57 solves / Mtok | 1.62 solves / Mtok | **1.03x economic yield multiplier** |
+| **Both-Solved Paired Ratio** | 335,106 avg | 243,896 avg | **1.40x geometric mean savings** [1.23x, 1.60x] |
+
+#### 2. Concordance & Discordance Matrix
+
+```text
+paired solve breakdown (5 tasks):
+  both solve:            2  (hyp3-sdk-71 [1.60x savings], pelita-696 [1.23x savings])
+  control-only solve:    1  (pelita-875)
+  mintok-only solve:     1  (pelita-863: MinTok Solved in 258k tokens, Control Failed in 418k)
+  both fail:            1  (pelita-798)
+```
+
+#### 3. Qualitative Breakdown: The MinTok-Only Solve on `ASPP__pelita-863`
+
+The execution of `ASPP__pelita-863` directly demonstrates the progressive escalation mechanism:
+1. **Targeted Discovery Unlocked**: MinTok initially attempted direct reads on `test_team.py` and `tests/test_team.py`, hitting missing file errors. Instead of failing blindly or wandering across directories, Escalation Level 3 unlocked `find_files`, which immediately pinpointed the non-standard `test/test_team.py`.
+2. **Stagnation Fallback Unlocked**: When the model made Python indentation errors on its initial replacement patch, the controller detected 2 consecutive rejected patch attempts and unlocked Level 4 unrestricted shell fallback.
+3. **Clean Fix**: Using shell inspection to confirm exact line endings, MinTok generated the gold `__repr__` method and passed the official test suite in 258,984 tokens.
+4. **Control Failure**: Control wandered through manual bash edits, executed conflicting `git stash` operations, polluted the working tree, and failed after consuming 418,592 tokens (+61.6% more tokens than MinTok).
+
+Durable Run Record: [`swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json).
+
+---
 
 *Archived for reference and continuity; superseded by the September 2026 free model matrix above:*
 

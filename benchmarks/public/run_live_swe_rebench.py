@@ -45,11 +45,16 @@ RUNS_DIR = Path(__file__).resolve().parent / "runs"
 SCRATCH_DIR = Path("/home/aqua/bench-run/swe-live")
 
 
-def load_swe_rebench_window() -> list[dict[str, Any]]:
-    w_path = WINDOWS_DIR / "swe_rebench_window_a.json.gz"
+def load_swe_rebench_window(window_target: str = "swe_rebench_window_eval_50.json.gz") -> list[dict[str, Any]]:
+    w_path = Path(window_target)
+    if not w_path.exists():
+        w_path = WINDOWS_DIR / window_target
+    if not w_path.exists() and not window_target.endswith(".json.gz"):
+        w_path = WINDOWS_DIR / f"{window_target}.json.gz"
+    assert w_path.exists(), f"Window file not found: {window_target}"
     with gzip.open(w_path, "rt", encoding="utf-8") as f:
         data = json.load(f)
-    assert verify_window_fingerprint(data), "Window fingerprint mismatch"
+    assert verify_window_fingerprint(data), f"Window fingerprint mismatch for {w_path.name}"
     return data["tasks"]
 
 
@@ -195,6 +200,7 @@ def run_live_task(
     model: str,
     provider: str = "openrouter",
     resume: bool = True,
+    mintok_policy: str = "adaptive",
 ) -> tuple[PublicRunRecord, dict[str, Any]]:
     """Run one live arm on one real SWE-rebench task."""
     tid = task["instance_id"]
@@ -202,18 +208,19 @@ def run_live_task(
     commit = task["base_commit"]
     instruction = task["problem_statement"]
 
-    policy = "control" if arm == "control" else "S"
-    workspace = SCRATCH_DIR / f"{tid}_{arm}"
-    log_file = SCRATCH_DIR / f"{tid}_{arm}.jsonl"
-    usage_file = SCRATCH_DIR / f"{tid}_{arm}.usage.json"
+    policy = "control" if arm == "control" else mintok_policy
+    arm_key = arm if arm == "control" else f"{arm}_{mintok_policy}"
+    workspace = SCRATCH_DIR / f"{tid}_{arm_key}"
+    log_file = SCRATCH_DIR / f"{tid}_{arm_key}.jsonl"
+    usage_file = SCRATCH_DIR / f"{tid}_{arm_key}.usage.json"
 
     if resume and usage_file.exists() and workspace.exists():
-        print(f"  [{arm.upper()}] Reusing existing completed live run for {tid}...")
+        print(f"  [{arm.upper()} - {policy}] Reusing existing completed live run for {tid}...")
         with open(usage_file, "r", encoding="utf-8") as f:
             usage = json.load(f)
         summary = {"usage": usage, "turns": usage.get("turns", 0)}
     else:
-        print(f"  [{arm.upper()}] Preparing real repo {repo} @ {commit[:8]}...")
+        print(f"  [{arm.upper()} - {policy}] Preparing real repo {repo} @ {commit[:8]}...")
         ok = prepare_live_workspace(repo, commit, workspace)
         if not ok:
             # If repo clone fails, record fail
@@ -295,6 +302,7 @@ def save_live_progress(
     mintok_runs: list[PublicRunRecord],
     model: str,
     provider: str,
+    run_name: str = "swe_rebench_live_space_bunny_alpha",
     final: bool = False,
 ) -> PublicBenchmarkReport:
     report = evaluate_paired_public_runs(
@@ -303,10 +311,19 @@ def save_live_progress(
         compute_bootstrap=final,
         bootstrap_resamples=1000 if final else 100,
     )
+    c_s = sum(1 for r in ctrl_runs if r.solved)
+    m_s = sum(1 for r in mintok_runs if r.solved)
+    c_tok = sum(r.provider_tokens for r in ctrl_runs)
+    m_tok = sum(r.provider_tokens for r in mintok_runs)
+    c_yield = (c_s / c_tok) * 1e6 if c_tok else 0.0
+    m_yield = (m_s / m_tok) * 1e6 if m_tok else 0.0
+    yield_multiplier = (m_yield / c_yield) if c_yield else 0.0
+
     out_payload = {
         "benchmark": "swe_rebench_live",
         "model": model,
         "provider": provider,
+        "run_name": run_name,
         "timestamp": time.time(),
         "report": {
             "total_tasks": report.total_tasks,
@@ -318,19 +335,20 @@ def save_live_progress(
             "both_fail": report.both_fail,
             "efficiency_multiplier": report.efficiency_multiplier,
             "both_solved_geomean": report.both_solved_geomean,
+            "control_solves_per_mtok": c_yield,
+            "mintok_solves_per_mtok": m_yield,
+            "economic_yield_multiplier": yield_multiplier,
         },
         "control_runs": [asdict(r) for r in ctrl_runs],
         "mintok_runs": [asdict(r) for r in mintok_runs],
     }
-    out_file = RUNS_DIR / "swe_rebench_live_space_bunny_alpha.json"
-    scratch_out_file = SCRATCH_DIR / "swe_rebench_live_space_bunny_alpha.json"
-    saved = False
+    out_file = RUNS_DIR / f"{run_name}.json"
+    scratch_out_file = SCRATCH_DIR / f"{run_name}.json"
     for p in [out_file, scratch_out_file]:
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(out_payload, f, indent=2)
-            saved = True
             break
         except OSError:
             continue
@@ -339,26 +357,41 @@ def save_live_progress(
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="run_live_swe_rebench")
+    parser.add_argument("--window", default="swe_rebench_window_eval_50.json.gz", help="Window filename or path")
     parser.add_argument("--model", default="stealth/space-bunny-alpha")
-    parser.add_argument("--limit", type=int, default=30)
+    parser.add_argument("--mintok-policy", default="adaptive", choices=["adaptive", "S", "C"], help="Policy for MinTok arm")
+    parser.add_argument("--offset", type=int, default=0, help="Offset into selected tasks")
+    parser.add_argument("--limit", type=int, default=None, help="Number of tasks to evaluate")
     parser.add_argument("--provider", default="openrouter")
     parser.add_argument("--resume", action="store_true", default=True)
+    parser.add_argument("--run-name", default=None, help="Custom output run name")
     args = parser.parse_args()
 
     api_key = resolve_api_key(args.provider)
     assert api_key, f"API key for {args.provider} not resolved!"
 
-    tasks = load_swe_rebench_window()
+    tasks = load_swe_rebench_window(args.window)
+    selected_tasks = tasks[args.offset : (args.offset + args.limit if args.limit is not None else len(tasks))]
+
+    model_slug = args.model.replace("/", "_").replace(":", "_").replace("-", "_")
+    window_slug = Path(args.window).stem.replace(".json", "")
+    run_name = args.run_name or f"{window_slug}_{model_slug}_{args.mintok_policy}"
+
     print("=" * 70)
     print("LIVE SWE-REBENCH EVALUATION (GENUINE REPO RUNS)")
     print("=" * 70)
-    print(f"Model:    {args.model}")
-    print(f"Provider: {args.provider}")
-    print(f"Tasks:    {args.limit} tasks (paired: {args.limit * 2} live runs)")
+    print(f"Window:        {args.window} ({len(selected_tasks)} tasks)")
+    print(f"Model:         {args.model}")
+    print(f"Provider:      {args.provider}")
+    print(f"MinTok Policy: {args.mintok_policy}")
+    print(f"Run Name:      {run_name}")
+    print("-" * 70)
+    print("Pre-registered Yield Targets (Economic Objective):")
+    print("  Primary Metric: Solves / Million Provider Tokens (all-attempt allocated)")
+    print("  Minimum Viable: Solve Rate >= Control - 3pp, Yield >= 1.25x Control")
+    print("  Strong:         Solve Rate >= Control,       Yield >= 1.50x Control")
+    print("  Breakthrough:   Solve Rate >= Control,       Yield >= 2.00x Control")
     print("=" * 70)
-
-    # Pre-registered pilot task selection
-    selected_tasks = tasks[:args.limit]
 
     ctrl_runs: list[PublicRunRecord] = []
     mintok_runs: list[PublicRunRecord] = []
@@ -370,13 +403,20 @@ def main() -> None:
         # Balanced order: even index control first, odd index mintok first
         order = ["control", "mintok"] if idx % 2 == 0 else ["mintok", "control"]
         for arm in order:
-            rec, meta = run_live_task(t, arm, args.model, provider=args.provider, resume=args.resume)
+            rec, meta = run_live_task(
+                t,
+                arm,
+                args.model,
+                provider=args.provider,
+                resume=args.resume,
+                mintok_policy=args.mintok_policy,
+            )
             if arm == "control":
                 ctrl_runs.append(rec)
             else:
                 mintok_runs.append(rec)
 
-        rep = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, final=False)
+        rep = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, run_name=run_name, final=False)
         c_s = sum(1 for r in ctrl_runs if r.solved)
         m_s = sum(1 for r in mintok_runs if r.solved)
         c_tok = sum(r.provider_tokens for r in ctrl_runs)
@@ -389,23 +429,23 @@ def main() -> None:
         m_t_sol = (m_tok / m_s) if m_s else 0
         c_sol_mtok = (c_s / c_tok) * 1e6 if c_tok else 0.0
         m_sol_mtok = (m_s / m_tok) * 1e6 if m_tok else 0.0
-        ratio = (c_t_sol / m_t_sol) if (c_t_sol and m_t_sol) else 0.0
+        yield_ratio = (m_sol_mtok / c_sol_mtok) if c_sol_mtok else 0.0
 
         print(f"\n--- Progress [{idx}/{len(selected_tasks)}] ---")
         print(f"  Solve Rate:                Control {c_s}/{n} ({c_s/n*100:.1f}%) | MinTok {m_s}/{n} ({m_s/n*100:.1f}%)")
         print(f"  Tokens / Attempt:          Control {c_t_att:,.0f} | MinTok {m_t_att:,.0f}")
         print(f"  Tokens / Solved:           Control {c_t_sol:,.0f} | MinTok {m_t_sol:,.0f}")
         print(f"  Solves / Million Tokens:   Control {c_sol_mtok:.2f} | MinTok {m_sol_mtok:.2f}")
-        print(f"  Success / Inference Ratio: {ratio:.2f}x (both: {rep.both_solve}, ctrl_only: {rep.control_only}, min_only: {rep.mintok_only}, fail: {rep.both_fail})")
+        print(f"  Economic Yield Multiplier: {yield_ratio:.2f}x (both: {rep.both_solve}, ctrl_only: {rep.control_only}, min_only: {rep.mintok_only}, fail: {rep.both_fail})")
 
     # Evaluate final paired results with full bootstrap
-    final_report = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, final=True)
+    final_report = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, run_name=run_name, final=True)
 
     print("\n" + "=" * 70)
     print("LIVE SWE-REBENCH FINAL RESULTS (GENUINE RUNS)")
     print("=" * 70)
     from mintok.public_bench import render_report_table
-    print(render_report_table(final_report, "SWE-rebench (Live)"))
+    print(render_report_table(final_report, f"SWE-rebench Live ({args.mintok_policy})"))
 
 
 if __name__ == "__main__":
