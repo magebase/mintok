@@ -1241,22 +1241,22 @@ To enforce strict data hygiene and eliminate benchmark overfitting:
 
 ---
 
-### Empirical Live SWE-rebench Evaluation: Window Eval 50 (20 Tasks Evaluated)
+### Empirical Live SWE-rebench Evaluation: 20-Task Evaluation Subset of Frozen Window Eval 50
 
-The 20-task evaluation (40 paired live runs) was executed on `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha` with the progressive escalation controller:
+The 20-task evaluation subset (40 paired live runs) was executed on the first 20 tasks of `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha` with the progressive escalation controller:
 
 #### 1. Aggregate Performance (Tasks 1–20, 40 Paired Trajectories)
 
 | Metric | Control Arm (Shell) | MinTok 2.0 Arm (Adaptive) | Effect / Ratio |
 |---|---|---|---|
-| **Solve Rate** | 5/20 (25.0%) | 7/20 (35.0%) | **+10.0pp** (+40.0% relative solve improvement) |
+| **Solve Rate** | 5/20 (25.0%) | 7/20 (35.0%) | MinTok solved 7/20 vs 5/20 in this sample (+10.0pp) |
 | **Total Provider Tokens** | 8,898,903 | 6,233,856 | **-29.9% overall token reduction** (-2,665,047 tokens saved) |
 | **Tokens / Attempt (All Tasks)** | 444,945 | 311,693 | **1.43x token reduction** |
 | **Tokens / Solved (Strict Solved)** | 273,297 | 241,559 | **1.13x efficiency multiplier** |
-| **Tokens / Solved (All-Attempt Allocated)** | 1,779,781 | 890,551 | **2.00x efficiency multiplier** |
-| **Solves / Million Tokens (All Spend)** | 0.56 solves / Mtok | 1.12 solves / Mtok | **2.00x economic yield multiplier** |
+| **Tokens / Solved (All-Attempt Allocated)** | 1,779,781 | 890,551 | **1.999x efficiency multiplier** (exact: 1.9985x) |
+| **Solves / Million Tokens (All Spend)** | 0.5619 solves / Mtok | 1.1229 solves / Mtok | **1.999x economic yield multiplier** (exact: 1.9985x) |
 | **Both-Solved Paired Ratio (4 tasks)** | 274,596 avg | 216,195 avg | **1.33x geometric mean savings** [0.86x, 1.81x] |
-| **Gate Status** | — | — | **BREAKTHROUGH** (Solve Rate $\ge$ Control, Yield $\ge 2.00\times$) |
+| **Gate Status** | — | — | **STRONG** (Yield $\ge 1.50\times$; unrounded 1.9985x narrowly misses 2.0000x BREAKTHROUGH) |
 
 #### 2. Concordance & Discordance Matrix
 
@@ -1272,15 +1272,28 @@ paired solve breakdown (20 tasks):
                             apptuit-py-10, apptuit-py-21, python-crypto-116, pando.py-586)
 ```
 
-#### 3. Key Empirical Findings: Resolving the Exploration vs Pruning Tradeoff
+#### 3. Outlier Sensitivity Analysis (Excluding OpenHands Runaway)
 
-1. **MinTok 2.0 Outperforms Control on Real Repositories**: Across 20 genuine SWE-rebench tasks, MinTok 2.0 achieved a **35.0% solve rate** versus Control's **25.0%**, while cutting total inference by **29.9%** (saving 2.67M provider tokens).
-2. **Three MinTok-Only Rescues**:
+On `All-Hands-AI__openhands-resolver-137`, Control spiraled into an unrestricted shell search loop consuming **1,936,245 tokens** before failing, while MinTok's progressive escalation contained the intractable failure at **193,955 tokens** (a **9.98x token reduction**).
+
+To test whether the economic yield is merely manufactured by a single runaway failure, we recompute all-attempt metrics excluding this pair:
+
+- **Control Spend (19 tasks)**: 6,962,658 tokens, 5 solves $\to$ **0.7181 solves / Mtok** (1,392,532 tokens / solve)
+- **MinTok 2.0 Spend (19 tasks)**: 6,039,901 tokens, 7 solves $\to$ **1.1589 solves / Mtok** (862,843 tokens / solve)
+- **Adjusted Economic Yield**: $\frac{1.1589}{0.7181} \approx \mathbf{1.61\times}$
+
+Even after removing the catastrophic Control runaway, MinTok 2.0 delivers a **1.61x economic yield**, comfortably exceeding the **STRONG** gate ($\ge 1.50\times$).
+
+#### 4. Key Empirical Findings: Resolving the Exploration vs Pruning Tradeoff
+
+1. **Statistically Rigorous Sample Yield**: Across this 20-task evaluation subset, MinTok achieved **1.1229 solves / Mtok** vs Control's **0.5619 solves / Mtok**, an unrounded **1.9985x economic yield** (**1.999x**, certified **STRONG Gate**).
+2. **Conservative Capability Claim**: MinTok solved 7/20 tasks vs Control's 5/20 in this sample. With only 4 discordant outcomes (3 MinTok rescues vs 1 Control-only solve), this is promising sample evidence that bounded semantic context prevents wandering, but is insufficient evidence to assert a generalized capability improvement. Both-solved geometric mean savings is **1.33x** [95% CI: 0.86x, 1.81x].
+3. **Three MinTok-Only Rescues**:
    - `ASPP__pelita-863`: MinTok's targeted discovery located `test/test_team.py`, and stagnation fallback cleanly repaired the issue in 258,984 tokens while Control corrupted git history in 418,592 tokens.
    - `All-Hands-AI__openhands-aci-55`: MinTok bounded exploration to relevant schema classes and passed in 286,004 tokens; Control timed out wandering through bash subprocesses in 317,377 tokens.
    - `All-Hands-AI__openhands-resolver-123`: MinTok localized the git conflict resolver in 281,146 tokens; Control failed in 386,375 tokens.
-3. **Catastrophic Control Runaway Avoided**: In `All-Hands-AI__openhands-resolver-137`, Control spiraled into an unrestricted shell search loop consuming **1,936,245 tokens** before failing. MinTok's bounded progressive escalation contained the failure at **193,955 tokens** (a **9.98x token reduction** on an intractable task).
-4. **Economic Yield Multiplier**: MinTok delivers **1.12 verified solves per million provider tokens** versus Control's **0.56**, achieving the pre-registered **Breakthrough Gate** ($\ge 2.00\times$ economic yield with no degradation in solve rate).
+4. **Catastrophic Failure Bounding**: Real agent deployments pay for failures. MinTok avoids unbounded shell loops on impossible tasks without blinding the agent on solvable ones.
+5. **Frozen Holdout Continuation**: This 20-task run represents the initial evaluated subset of the pre-registered 50-task window `swe_rebench_window_eval_50.json.gz`. The remaining 30 tasks are evaluated under the identical frozen policy.
 
 Durable Run Record: [`swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json).
 
