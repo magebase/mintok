@@ -349,7 +349,6 @@ def save_live_progress(
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(out_payload, f, indent=2)
-            break
         except OSError:
             continue
     return report
@@ -393,6 +392,23 @@ def main() -> None:
     print("  Breakthrough:   Solve Rate >= Control,       Yield >= 2.00x Control")
     print("=" * 70)
 
+    existing_ctrl: dict[str, PublicRunRecord] = {}
+    existing_mintok: dict[str, PublicRunRecord] = {}
+    if args.resume:
+        for p in [RUNS_DIR / f"{run_name}.json", SCRATCH_DIR / f"{run_name}.json"]:
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        saved = json.load(f)
+                    for r in saved.get("control_runs", []):
+                        existing_ctrl[r["task_id"]] = PublicRunRecord(**r)
+                    for r in saved.get("mintok_runs", []):
+                        existing_mintok[r["task_id"]] = PublicRunRecord(**r)
+                    print(f"Loaded {len(existing_ctrl)} existing paired records from {p.name}")
+                    break
+                except Exception as e:
+                    print(f"Warning: could not load existing run {p}: {e}")
+
     ctrl_runs: list[PublicRunRecord] = []
     mintok_runs: list[PublicRunRecord] = []
 
@@ -400,21 +416,29 @@ def main() -> None:
         tid = t["instance_id"]
         print(f"\n[{idx:02d}/{len(selected_tasks):02d}] TASK: {tid}")
 
-        # Balanced order: even index control first, odd index mintok first
-        order = ["control", "mintok"] if idx % 2 == 0 else ["mintok", "control"]
-        for arm in order:
-            rec, meta = run_live_task(
-                t,
-                arm,
-                args.model,
-                provider=args.provider,
-                resume=args.resume,
-                mintok_policy=args.mintok_policy,
-            )
-            if arm == "control":
-                ctrl_runs.append(rec)
-            else:
-                mintok_runs.append(rec)
+        if args.resume and tid in existing_ctrl and tid in existing_mintok:
+            c_rec = existing_ctrl[tid]
+            m_rec = existing_mintok[tid]
+            ctrl_runs.append(c_rec)
+            mintok_runs.append(m_rec)
+            print(f"  [CONTROL] Loaded cached record: Solved={c_rec.solved} | Provider Tokens: {c_rec.provider_tokens:,} | Turns: {c_rec.turns}")
+            print(f"  [MINTOK]  Loaded cached record: Solved={m_rec.solved} | Provider Tokens: {m_rec.provider_tokens:,} | Turns: {m_rec.turns}")
+        else:
+            # Balanced order: even index control first, odd index mintok first
+            order = ["control", "mintok"] if idx % 2 == 0 else ["mintok", "control"]
+            for arm in order:
+                rec, meta = run_live_task(
+                    t,
+                    arm,
+                    args.model,
+                    provider=args.provider,
+                    resume=args.resume,
+                    mintok_policy=args.mintok_policy,
+                )
+                if arm == "control":
+                    ctrl_runs.append(rec)
+                else:
+                    mintok_runs.append(rec)
 
         rep = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, run_name=run_name, final=False)
         c_s = sum(1 for r in ctrl_runs if r.solved)
