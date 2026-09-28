@@ -62,6 +62,19 @@ Feature: Adaptive sequential escalation controller
     Then the escalation controller level is 4
     And the active tools include "shell"
 
+  Scenario: Exploratory stalling without edits detects stagnation
+    Given an escalation controller at level 0
+    When 8 consecutive read queries occur without edits
+    Then stagnation is detected
+    And the escalation controller level is 4
+    And the active tools include "shell"
+
+  Scenario: Empty slices unlock broaden and targeted discovery
+    Given an escalation controller at level 0
+    When 2 empty slice queries occur
+    Then the escalation controller level is at least 3
+    And the active tools include "find_files"
+
   Scenario: Yield per million tokens accurately computes economic efficiency
     Given 4 solved tasks out of 30 attempts
     And a total spend of 11000000 provider tokens

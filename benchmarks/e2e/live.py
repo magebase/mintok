@@ -398,7 +398,17 @@ def run_loop(
             turn_tools = [t for t in TOOL_SCHEMAS["adaptive"] if t["name"] in active_names]
             if ctrl.level > current_level:
                 current_level = ctrl.level
-                if ctrl.level == EscalationLevel.TARGETED_DISCOVERY:
+                if ctrl.level == EscalationLevel.BROADEN:
+                    messages.append({
+                        "role": "user",
+                        "content": "[harness] Escalation Level 1 reached: 'broaden' tool is unlocked to expand slice search.",
+                    })
+                elif ctrl.level == EscalationLevel.TRACE_SLICED:
+                    messages.append({
+                        "role": "user",
+                        "content": "[harness] Escalation Level 2 reached: 'trace_slice' tool is unlocked to slice around test traceback frames.",
+                    })
+                elif ctrl.level == EscalationLevel.TARGETED_DISCOVERY:
                     messages.append({
                         "role": "user",
                         "content": "[harness] Escalation Level 3 reached: targeted discovery tools (find_files, grep) are now unlocked to locate files.",
@@ -406,7 +416,7 @@ def run_loop(
                 elif ctrl.level == EscalationLevel.FULL_FALLBACK:
                     messages.append({
                         "role": "user",
-                        "content": "[harness] Escalation Level 4 reached: stagnation detected. Unrestricted shell is now unlocked to diagnose and fix the issue directly.",
+                        "content": "[harness] Escalation Level 4 reached: stagnation detected. Unrestricted shell is now unlocked to diagnose, run tests, and fix the issue directly.",
                     })
         else:
             turn_tools = tools

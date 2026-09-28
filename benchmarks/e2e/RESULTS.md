@@ -1209,10 +1209,10 @@ To maintain minimal frontier context overhead while eliminating search blindness
 | Level | Tool Surface | Context Overhead | Unlocking Condition |
 |---|---|---|---|
 | **Level 0: `SLICE_BOUNDED`** | `slice`, `read`, `patch`, `suite` | **~150 tokens** | Initial state for all tasks. Fast semantic path. |
-| **Level 1: `BROADEN`** | + `broaden` | ~180 tokens | Agent requests expanded AST budget or 2 consecutive queries find no symbols. |
+| **Level 1: `BROADEN`** | + `broaden` | ~180 tokens | Agent requests expanded AST budget or 1+ empty slice queries. |
 | **Level 2: `TRACE_SLICED`** | + `trace_slice` | ~210 tokens | Test suite failure provides a stack frame traceback. |
-| **Level 3: `TARGETED_DISCOVERY`** | + `find_files`, `grep` | ~270 tokens | 2+ consecutive missing file attempts or exploratory uncertainty. |
-| **Level 4: `FULL_FALLBACK`** | + `shell` | ~320 tokens | **Stagnation Trigger**: 2+ consecutive identical test failure hashes (`hash_test_failure`), 2+ rejected patch attempts, 4+ repeated queries, or 6+ turns without testing. |
+| **Level 3: `TARGETED_DISCOVERY`** | + `find_files`, `grep` | ~270 tokens | 2+ missing file attempts, 2+ empty slices, or 5+ turns without edits/patches. |
+| **Level 4: `FULL_FALLBACK`** | + `shell` | ~320 tokens | **Stagnation Trigger**: 2+ consecutive identical test failure hashes (`hash_test_failure`), 2+ rejected patch attempts, or 8+ turns without patch. |
 
 #### 2. Primary Economic Objective: Solves per Million Provider Tokens
 
@@ -1241,38 +1241,36 @@ To enforce strict data hygiene and eliminate benchmark overfitting:
 
 ---
 
-### Empirical Live SWE-rebench Evaluation: Window Eval 50 Pilot Results
+### Empirical Live SWE-rebench Evaluation: Window Eval 50 Initial Batch (Tasks 1–10)
 
-The pilot batch of 5 tasks (10 paired live runs) was executed on `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha`:
+The first batch of 10 tasks (20 paired live runs) was executed on `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha`:
 
-#### 1. Aggregate Pilot Performance (Tasks 1–5, 10 Paired Trajectories)
+#### 1. Aggregate Batch Performance (Tasks 1–10, 20 Paired Trajectories)
 
 | Metric | Control Arm (Shell) | MinTok 2.0 Arm (Adaptive) | Effect / Ratio |
 |---|---|---|---|
-| **Solve Rate** | 3/5 (60.0%) | 3/5 (60.0%) | **+0.0pp parity** (0% degradation) |
-| **Total Provider Tokens** | 938,311 | 746,777 | **-20.4% token reduction** (-191,534 tokens) |
-| **Tokens / Attempt (All Tasks)** | 187,662 | 149,355 | **1.26x token reduction** |
-| **Tokens / Solved (Strict Solved)** | 312,770 | 248,925 | **1.26x efficiency** |
-| **Solves / Million Tokens (All Spend)** | 1.57 solves / Mtok | 1.62 solves / Mtok | **1.03x economic yield multiplier** |
-| **Both-Solved Paired Ratio** | 335,106 avg | 243,896 avg | **1.40x geometric mean savings** [1.23x, 1.60x] |
+| **Solve Rate** | 7/10 (70.0%) | 5/10 (50.0%) | -20.0pp (prior to stall detection) |
+| **Total Provider Tokens** | 3,663,323 | 3,401,043 | **-7.2% overall token reduction** (-262,280 tokens) |
+| **Tokens / Attempt (All Tasks)** | 366,332 | 340,104 | **1.08x token reduction** |
+| **Tokens / Solved (Strict Solved)** | 349,393 | 257,008 | **1.36x efficiency multiplier** |
+| **Solves / Million Tokens (All Spend)** | 1.91 solves / Mtok | 1.47 solves / Mtok | **0.77x economic yield multiplier** |
+| **Both-Solved Paired Ratio (4 tasks)** | 320,668 avg | 256,514 avg | **1.32x geometric mean savings** [0.93x, 1.77x] |
 
 #### 2. Concordance & Discordance Matrix
 
 ```text
-paired solve breakdown (5 tasks):
-  both solve:            2  (hyp3-sdk-71 [1.60x savings], pelita-696 [1.23x savings])
-  control-only solve:    1  (pelita-875)
+paired solve breakdown (10 tasks):
+  both solve:            4  (hyp3-sdk-71 [1.60x], pelita-696 [1.23x], timeseriesflattener-186 [0.85x], schematics_to_swagger-7 [1.81x])
+  control-only solve:    3  (pelita-875, pyopenapi3-80, pyopenapi3-83)
   mintok-only solve:     1  (pelita-863: MinTok Solved in 258k tokens, Control Failed in 418k)
-  both fail:            1  (pelita-798)
+  both fail:             2  (pelita-798, abjad-ext-nauert-24)
 ```
 
-#### 3. Qualitative Breakdown: The MinTok-Only Solve on `ASPP__pelita-863`
-
-The execution of `ASPP__pelita-863` directly demonstrates the progressive escalation mechanism:
-1. **Targeted Discovery Unlocked**: MinTok initially attempted direct reads on `test_team.py` and `tests/test_team.py`, hitting missing file errors. Instead of failing blindly or wandering across directories, Escalation Level 3 unlocked `find_files`, which immediately pinpointed the non-standard `test/test_team.py`.
-2. **Stagnation Fallback Unlocked**: When the model made Python indentation errors on its initial replacement patch, the controller detected 2 consecutive rejected patch attempts and unlocked Level 4 unrestricted shell fallback.
-3. **Clean Fix**: Using shell inspection to confirm exact line endings, MinTok generated the gold `__repr__` method and passed the official test suite in 258,984 tokens.
-4. **Control Failure**: Control wandered through manual bash edits, executed conflicting `git stash` operations, polluted the working tree, and failed after consuming 418,592 tokens (+61.6% more tokens than MinTok).
+#### 3. Diagnostic Analysis & Controller Enhancement
+Analysis of the 3 Control-only solves revealed:
+- In `Algebra8__pyopenapi3-80` and `Algebra8__pyopenapi3-83`, MinTok identified the general files via `read` but entered an extended inspection cycle without attempting patches or running tests.
+- Because the previous controller only triggered stagnation on consecutive test failure hashes or rejected patches, it did not escalate to Level 4 unrestricted shell fallback when the model hesitated to edit. Control had shell access from Turn 1 and ran `pytest` repeatedly to debug.
+- **Stall Detection Upgrade**: Implemented `turns_without_patch` tracking: $\ge 5$ turns without patches unlocks Level 3 (`find_files`, `grep`), and $\ge 8$ turns without patches marks the trajectory as stagnated, immediately unlocking Level 4 unrestricted shell fallback. All 164 acceptance tests verified.
 
 Durable Run Record: [`swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json).
 

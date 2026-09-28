@@ -118,6 +118,8 @@ class TrajectoryFeatures:
     last_test_passed: bool = False
     stagnated: bool = False
     failing_target: str | None = None
+    turns_without_patch: int = 0
+    broaden_requests: int = 0
 
 
 LEVEL_TOOLS: dict[EscalationLevel, list[str]] = {
@@ -161,6 +163,14 @@ class EscalationController:
         self.features.turns += 1
         self.features.provider_tokens += event.tokens
 
+        if event.tool == "patch" and event.exit_code == 0 and "rejected" not in event.output and "syntax error" not in event.output:
+            self.features.turns_without_patch = 0
+        else:
+            self.features.turns_without_patch += 1
+
+        if event.tool == "broaden":
+            self.features.broaden_requests += 1
+
         # Check tool-specific patterns
         if event.tool == "read" and ("error: no such file" in event.output or event.exit_code != 0):
             self.features.missing_file_reads += 1
@@ -200,6 +210,7 @@ class EscalationController:
         if (
             self.features.consecutive_identical_test_failures >= 2
             or self.features.rejected_patches >= 2
+            or self.features.turns_without_patch >= 8
         ):
             self.features.stagnated = True
 
@@ -210,11 +221,11 @@ class EscalationController:
     def _update_level(self) -> None:
         if self.features.stagnated:
             self.level = max(self.level, EscalationLevel.FULL_FALLBACK)
-        elif self.features.missing_file_reads >= 2:
+        elif self.features.missing_file_reads >= 2 or self.features.empty_slices >= 2 or self.features.turns_without_patch >= 5:
             self.level = max(self.level, EscalationLevel.TARGETED_DISCOVERY)
         elif self.features.failing_target is not None:
             self.level = max(self.level, EscalationLevel.TRACE_SLICED)
-        elif self.features.empty_slices >= 1:
+        elif self.features.empty_slices >= 1 or self.features.broaden_requests >= 1:
             self.level = max(self.level, EscalationLevel.BROADEN)
 
     def active_tools(self) -> list[str]:

@@ -124,6 +124,18 @@ def consecutive_identical_failures_occur(ctx: SimpleNamespace, count: int) -> No
         ctx.controller.record_event(TrajectoryEvent(tool="suite", exit_code=1, output="FAILED tests/t.py - AssertionError: 1 != 2"))
 
 
+@when(parsers.parse("{count:d} consecutive read queries occur without edits"))
+def consecutive_reads_without_edits_occur(ctx: SimpleNamespace, count: int) -> None:
+    for _ in range(count):
+        ctx.controller.record_event(TrajectoryEvent(tool="read", exit_code=0, output="def foo(): pass"))
+
+
+@when(parsers.parse("{count:d} empty slice queries occur"))
+def empty_slice_queries_occur(ctx: SimpleNamespace, count: int) -> None:
+    for _ in range(count):
+        ctx.controller.record_event(TrajectoryEvent(tool="slice", exit_code=0, output="0 candidates found"))
+
+
 @then(parsers.parse("the escalation controller level is {level:d}"))
 def level_is(ctx: SimpleNamespace, level: int) -> None:
     assert ctx.controller.level == level
