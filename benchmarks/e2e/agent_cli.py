@@ -199,9 +199,30 @@ POLICIES: dict[str, dict] = {
         "ops": set(),
         "breaker": False,
         "virtual_output": True,
+        "proactive_diagnosis": False,
     },
-    # v3: MinTok 3.0 runtime inference optimizer. Unrestricted execution
-    # with tool-output virtualization, macro-actions, and proactive diagnosis.
+    # v3_vcrmp: v3_vcrm + proactive diagnosis
+    "v3_vcrmp": {
+        "tools": {
+            "shell",
+            "patch",
+            "read",
+            "suite",
+            "expand",
+            "grep",
+            "find_files",
+            "slice",
+            "investigate_failure",
+            "localize_symbol",
+            "state_writers",
+            "change_ripple",
+        },
+        "ops": set(),
+        "breaker": False,
+        "virtual_output": True,
+        "proactive_diagnosis": True,
+    },
+    # v3: MinTok 3.1 full operating system (+ expected utility router).
     "v3": {
         "tools": {
             "shell",
@@ -221,6 +242,7 @@ POLICIES: dict[str, dict] = {
         "breaker": False,
         "virtual_output": True,
         "proactive_diagnosis": True,
+        "router": True,
     },
 }
 

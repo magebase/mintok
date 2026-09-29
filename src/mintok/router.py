@@ -324,4 +324,64 @@ def prediction_record(
             )
             for backend_name, data in actual.items()
         }
+        chosen_backend = decision.backend
+        chosen_exp = decision.policy_expectations.get(chosen_backend)
+        chosen_actual = actual.get(chosen_backend, {})
+        record["predicted_psolve"] = chosen_exp.p_success if chosen_exp else 0.5
+        record["predicted_tokens"] = chosen_exp.expected_tokens if chosen_exp else 2000
+        record["predicted_utility"] = chosen_exp.expected_utility if chosen_exp else 0.0
+        record["chosen_policy"] = chosen_backend
+        record["actual_solved"] = chosen_actual.get("solved", False)
+        record["actual_tokens"] = chosen_actual.get("tokens", 0)
+        record["actual_utility"] = record["utilities"].get(chosen_backend, 0.0)
+        max_u = max(record["utilities"].values()) if record["utilities"] else 0.0
+        record["utility_regret"] = max(0.0, max_u - record["actual_utility"])
+        best_backend = max(record["utilities"], key=record["utilities"].get) if record["utilities"] else chosen_backend
+        record["routing_regret"] = (best_backend != chosen_backend)
     return record
+
+
+def evaluate_router_calibration(records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compute calibration error, prediction MAE, and routing regret across task records."""
+    if not records:
+        return {
+            "tasks": 0,
+            "psolve_calibration_mae": 0.0,
+            "brier_score": 0.0,
+            "token_mae": 0.0,
+            "mean_utility_regret": 0.0,
+            "routing_regret_rate": 0.0,
+        }
+
+    psolve_errors = []
+    brier_scores = []
+    token_errors = []
+    utility_regrets = []
+    routing_regrets = []
+
+    for r in records:
+        p_pred = r.get("predicted_psolve", 0.5)
+        t_pred = r.get("predicted_tokens", 2000)
+
+        actual_solved = 1.0 if r.get("actual_solved", False) else 0.0
+        actual_tokens = r.get("actual_tokens", 0)
+
+        psolve_errors.append(abs(p_pred - actual_solved))
+        brier_scores.append((p_pred - actual_solved) ** 2)
+        if actual_tokens > 0:
+            token_errors.append(abs(t_pred - actual_tokens))
+
+        if "utility_regret" in r:
+            utility_regrets.append(r["utility_regret"])
+        if "routing_regret" in r:
+            routing_regrets.append(1.0 if r["routing_regret"] else 0.0)
+
+    n = len(records)
+    return {
+        "tasks": n,
+        "psolve_calibration_mae": sum(psolve_errors) / n if psolve_errors else 0.0,
+        "brier_score": sum(brier_scores) / n if brier_scores else 0.0,
+        "token_mae": sum(token_errors) / len(token_errors) if token_errors else 0.0,
+        "mean_utility_regret": sum(utility_regrets) / len(utility_regrets) if utility_regrets else 0.0,
+        "routing_regret_rate": sum(routing_regrets) / len(routing_regrets) if routing_regrets else 0.0,
+    }

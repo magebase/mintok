@@ -198,3 +198,41 @@ def then_metrics_net_compression(ctx, val: str):
     assert metrics["net_observation_compression_ratio"] > float(val)
 
 
+@when("git status output is received:")
+def when_git_status_received(ctx, docstring: str):
+    res, obs = ctx["virtualizer"].virtualize("git status", docstring)
+    ctx["result"] = res
+    ctx["obs"] = obs
+    ctx["raw"] = docstring
+
+
+@then(parsers.parse("the virtualized output summarizes git status with staged {staged:d} and unstaged {unstaged:d}"))
+def then_summarizes_git_status(ctx, staged: int, unstaged: int):
+    assert f"staged={staged}" in ctx["result"]
+    assert f"unstaged={unstaged}" in ctx["result"]
+
+
+@then(parsers.parse('the observation tier "{tier}" returns only handle "{prefix}"'))
+def then_tier_returns_handle(ctx, tier: str, prefix: str):
+    rendered = ctx["virtualizer"].render_tier(ctx["obs"].id, tier=tier)
+    assert rendered.startswith(prefix)
+    assert len(rendered.splitlines()) == 1
+
+
+@then(parsers.re(r"the predicted expansion probability for failed test is greater than (?P<prob>[\d.]+)"))
+def then_predicted_expansion_prob(ctx, prob: str):
+    from mintok.virtualization import predict_expansion_probability
+
+    p = predict_expansion_probability("pytest tests/", 1, "FAILED test_auth.py AssertionError")
+    assert p > float(prob)
+
+
+@then("the compressed output preserves critical tokens with action invariance")
+def then_preserves_action_invariance(ctx):
+    from mintok.virtualization import verify_action_invariance
+
+    check = verify_action_invariance(ctx["raw"], ctx["result"])
+    assert check["invariant"] is True
+
+
+

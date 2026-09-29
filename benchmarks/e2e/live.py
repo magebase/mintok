@@ -125,6 +125,11 @@ DISCIPLINE = {
         "Solve the task using shell, patch, read, grep, find_files, suite and macro-actions "
         "(investigate_failure, localize_symbol, state_writers, change_ripple)."
     ),
+    "v3_vcrmp": (
+        "You are an expert software engineer working in a copy of a repository. "
+        "Solve the task using shell, patch, read, grep, find_files, suite, and macro-actions. "
+        "Proactive diagnostics are provided upon test failures."
+    ),
 }
 
 TOOL_SCHEMAS = {
@@ -435,6 +440,7 @@ TOOL_SCHEMAS["v3_v"] = [t for t in TOOL_SCHEMAS["v3"] if t["name"] in _V3_BASE_N
 TOOL_SCHEMAS["v3_vc"] = list(TOOL_SCHEMAS["v3_v"])
 TOOL_SCHEMAS["v3_vcr"] = list(TOOL_SCHEMAS["v3_v"])
 TOOL_SCHEMAS["v3_vcrm"] = list(TOOL_SCHEMAS["v3"])
+TOOL_SCHEMAS["v3_vcrmp"] = list(TOOL_SCHEMAS["v3"])
 
 
 def execute_tool(root: Path, log: Path, policy: str, name: str, args: dict) -> tuple[str, int]:
@@ -548,8 +554,8 @@ def run_loop(
 
     system = DISCIPLINE[policy]
     tools = TOOL_SCHEMAS[policy]
-    has_profile = policy in ("v3", "v3_vcr", "v3_vcrm")
-    has_compiler = policy in ("v3", "v3_vc", "v3_vcr", "v3_vcrm")
+    has_profile = policy in ("v3", "v3_vcr", "v3_vcrm", "v3_vcrmp")
+    has_compiler = policy in ("v3", "v3_vc", "v3_vcr", "v3_vcrm", "v3_vcrmp")
 
     if has_profile:
         from mintok.repo_profile import scan_repo_profile

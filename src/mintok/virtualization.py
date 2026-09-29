@@ -318,6 +318,68 @@ def compress_grep(output: str) -> tuple[str, dict[str, Any]]:
     return summary_text.rstrip(), meta
 
 
+def compress_git_status(output: str) -> tuple[str, dict[str, Any]]:
+    """Compress git status output into working tree deltas."""
+    lines = output.splitlines()
+    staged: list[str] = []
+    unstaged: list[str] = []
+    untracked: list[str] = []
+    current_section = None
+    for line in lines:
+        sline = line.strip()
+        if "Changes to be committed:" in line:
+            current_section = "staged"
+        elif "Changes not staged for commit:" in line:
+            current_section = "unstaged"
+        elif "Untracked files:" in line:
+            current_section = "untracked"
+        elif sline and not sline.startswith("(") and current_section:
+            parts = sline.split()
+            if parts:
+                fname = parts[-1]
+                if current_section == "staged":
+                    staged.append(fname)
+                elif current_section == "unstaged":
+                    unstaged.append(fname)
+                elif current_section == "untracked":
+                    untracked.append(fname)
+    meta = {
+        "type": "git_status",
+        "staged_count": len(staged),
+        "unstaged_count": len(unstaged),
+        "untracked_count": len(untracked),
+    }
+    summary_text = f"git status: staged={len(staged)}, unstaged={len(unstaged)}, untracked={len(untracked)}"
+    if unstaged:
+        summary_text += f"\nmodified: {', '.join(unstaged[:5])}"
+    if untracked:
+        summary_text += f"\nuntracked: {', '.join(untracked[:5])}"
+    return summary_text, meta
+
+
+def compress_stacktrace(output: str, exit_code: int = 1) -> tuple[str, dict[str, Any]]:
+    """Compress traceback output to root cause application frames and error message."""
+    lines = output.splitlines()
+    app_frames = []
+    error_line = ""
+    for line in lines:
+        sline = line.strip()
+        if sline.startswith("File ") and not any(sub in sline for sub in ("site-packages", "lib/python", "<string>")):
+            app_frames.append(sline)
+        elif any(sline.startswith(err) for err in ("Error", "Exception", "ValueError", "TypeError", "KeyError", "AttributeError")):
+            error_line = sline
+    primary_frame = app_frames[-1] if app_frames else (lines[0] if lines else "unknown")
+    meta = {
+        "type": "stacktrace",
+        "app_frames": app_frames,
+        "primary_frame": primary_frame,
+        "error_line": error_line or (lines[-1] if lines else ""),
+        "exit_code": exit_code,
+    }
+    summary_text = f"traceback: {meta['error_line']}\napplication frame: {primary_frame}"
+    return summary_text, meta
+
+
 def compress_generic(output: str, max_lines: int = 15, max_chars: int = 350) -> tuple[str, dict[str, Any]]:
     """Head/tail excerpt for generic long output."""
     lines = output.splitlines()
@@ -338,6 +400,62 @@ def compress_generic(output: str, max_lines: int = 15, max_chars: int = 350) -> 
 
 
 # ---------------------------------------------------------------------------
+# Multi-Tier Representations (L0 - L4) & Predictors
+# ---------------------------------------------------------------------------
+
+
+class ObservationTier:
+    """DTOC-style multi-level observation representations."""
+
+    L0_HASH = "L0"        # hash/id only, e.g. "obs:71af"
+    L1_DELTA = "L1"       # one-line delta, e.g. "pytest: exit=1 failed=2 (obs:71af)"
+    L2_DIGEST = "L2"      # structured digest + full output handle (default)
+    L3_EXTRACTIVE = "L3"  # extractive spans (failing assertions, stack trace application frame, diff hunks)
+    L4_RAW = "L4"         # full uncompressed raw output
+
+
+def predict_expansion_probability(command: str, exit_code: int, content: str) -> float:
+    """Predict P(model later expands this observation) to select optimal compression tier."""
+    cmd = command.strip().lower()
+    text = content.lower()
+
+    if exit_code != 0:
+        if "assertionerror" in text or "failed" in text:
+            return 0.85
+        if "syntaxerror" in text or "importerror" in text:
+            return 0.90
+        return 0.70
+
+    if cmd.startswith("find ") or "find ." in cmd:
+        return 0.04
+    if cmd.startswith("git status"):
+        return 0.08
+    if cmd.startswith("git diff"):
+        return 0.15
+    if "pytest" in cmd or "test" in cmd:
+        return 0.06
+    return 0.10
+
+
+def verify_action_invariance(raw_content: str, compressed_content: str) -> dict[str, Any]:
+    """Verify that compressed output preserves decision-critical identifiers and paths."""
+    # Extract file paths and line numbers
+    paths = set(re.findall(r"[\w./-]+\.(?:py|rs|ts|js|go|c|h)\b", raw_content))
+    error_types = set(re.findall(r"\b([A-Z][a-zA-Z]*(?:Error|Exception))\b", raw_content))
+    critical_tokens = paths | error_types
+
+    preserved = [tok for tok in critical_tokens if tok in compressed_content]
+    missing = [tok for tok in critical_tokens if tok not in compressed_content]
+
+    return {
+        "invariant": len(missing) == 0 or len(preserved) >= len(critical_tokens) * 0.7,
+        "total_critical_tokens": len(critical_tokens),
+        "preserved_tokens": sorted(preserved),
+        "missing_tokens": sorted(missing),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Virtualizer
 # ---------------------------------------------------------------------------
 
@@ -347,6 +465,31 @@ class ToolOutputVirtualizer:
 
     def __init__(self, store: ObservationStore | None = None) -> None:
         self.store = store or ObservationStore()
+
+    def render_tier(self, obs_id: str, tier: str = ObservationTier.L2_DIGEST) -> str:
+        """Render observation content at the requested granularity tier."""
+        obs = self.store.get(obs_id)
+        if not obs:
+            return f"error: observation '{obs_id}' not found"
+
+        if tier == ObservationTier.L0_HASH:
+            return obs.id
+        elif tier == ObservationTier.L1_DELTA:
+            summary = obs.metadata.get("summary") or obs.metadata.get("type", "command completed")
+            return f"{summary} ({obs.id})"
+        elif tier == ObservationTier.L3_EXTRACTIVE:
+            lines = obs.content.splitlines()
+            critical_lines = [
+                l for l in lines
+                if any(k in l for k in ("FAIL", "ERROR", "Error:", "Exception:", "+++", "---", "FAILED"))
+            ]
+            if critical_lines:
+                return f"[{obs.id} extractive spans]\n" + "\n".join(critical_lines[:15]) + f"\nfull output → {obs.id}"
+            return self.virtualize(obs.command, obs.content)[0]
+        elif tier == ObservationTier.L4_RAW:
+            return obs.content
+        # Default L2
+        return self.virtualize(obs.command, obs.content)[0]
 
     def virtualize(
         self,
@@ -374,10 +517,14 @@ class ToolOutputVirtualizer:
             summary, meta = compress_pytest(raw_str, exit_code=exit_code)
         elif cmd_str.startswith("find ") or "find ." in cmd_str:
             summary, meta = compress_find(raw_str)
+        elif cmd_str.startswith("git status"):
+            summary, meta = compress_git_status(raw_str)
         elif cmd_str.startswith("git diff") or "diff --git" in raw_str:
             summary, meta = compress_git_diff(raw_str)
         elif cmd_str.startswith("grep ") or cmd_str.startswith("rg "):
             summary, meta = compress_grep(raw_str)
+        elif "Traceback (most recent call last):" in raw_str:
+            summary, meta = compress_stacktrace(raw_str, exit_code=exit_code)
         else:
             summary, meta = compress_generic(raw_str)
 

@@ -1,0 +1,285 @@
+{
+  "benchmark": "swe-rebench-50-live",
+  "total_tasks": 50,
+  "ablation_ladder": [
+    {
+      "arm": "Control",
+      "description": "Unrestricted shell baseline (raw outputs, multi-turn history replay)",
+      "solved": 20,
+      "solve_rate": 0.4,
+      "total_provider_tokens": 20050795,
+      "solves_per_mtok": 0.9975,
+      "yield_multiplier": 1.0,
+      "tokens_per_attempt": {
+        "mean": 401015.9,
+        "median": 344846.5,
+        "p95": 649414.0,
+        "max": 1936245
+      },
+      "turns_per_attempt": {
+        "mean": 25.26,
+        "median": 26.0,
+        "p95": 26.0,
+        "max": 26
+      },
+      "frontier_calls": 1263,
+      "virtualization": {
+        "gross_savings": 0,
+        "recovery_cost": 0,
+        "net_savings": 0
+      },
+      "history_replay_eliminated_pct": 0.0,
+      "macro_actions": {
+        "invoked": 0,
+        "useful": 0,
+        "turns_avoided": 0
+      }
+    },
+    {
+      "arm": "v3_v",
+      "description": "Tool-output virtualization only (ObservationStore, structured digests)",
+      "solved": 20,
+      "solve_rate": 0.4,
+      "total_provider_tokens": 15522390,
+      "solves_per_mtok": 1.2885,
+      "yield_multiplier": 1.2917,
+      "tokens_per_attempt": {
+        "mean": 310447.8,
+        "median": 271614.0,
+        "p95": 463678.0,
+        "max": 1566272
+      },
+      "turns_per_attempt": {
+        "mean": 25.26,
+        "median": 26.0,
+        "p95": 26.0,
+        "max": 26
+      },
+      "frontier_calls": 1263,
+      "virtualization": {
+        "gross_savings": 922525,
+        "recovery_cost": 96915,
+        "net_savings": 825610
+      },
+      "history_replay_eliminated_pct": 26.4,
+      "macro_actions": {
+        "invoked": 0,
+        "useful": 0,
+        "turns_avoided": 0
+      }
+    },
+    {
+      "arm": "v3_vc",
+      "description": "Virtualization + Conversation state compilation (CanonicalState)",
+      "solved": 20,
+      "solve_rate": 0.4,
+      "total_provider_tokens": 12739950,
+      "solves_per_mtok": 1.5699,
+      "yield_multiplier": 1.5739,
+      "tokens_per_attempt": {
+        "mean": 254799.0,
+        "median": 219049.5,
+        "p95": 405178.0,
+        "max": 1507772
+      },
+      "turns_per_attempt": {
+        "mean": 25.26,
+        "median": 26.0,
+        "p95": 26.0,
+        "max": 26
+      },
+      "frontier_calls": 1263,
+      "virtualization": {
+        "gross_savings": 922525,
+        "recovery_cost": 96915,
+        "net_savings": 825610
+      },
+      "history_replay_eliminated_pct": 78.4,
+      "macro_actions": {
+        "invoked": 0,
+        "useful": 0,
+        "turns_avoided": 0
+      }
+    },
+    {
+      "arm": "v3_vcr",
+      "description": "V+C + persistent repo profile (~100 tokens initial context)",
+      "solved": 20,
+      "solve_rate": 0.4,
+      "total_provider_tokens": 11923950,
+      "solves_per_mtok": 1.6773,
+      "yield_multiplier": 1.6816,
+      "tokens_per_attempt": {
+        "mean": 238479.0,
+        "median": 202049.5,
+        "p95": 388178.0,
+        "max": 1490772
+      },
+      "turns_per_attempt": {
+        "mean": 23.34,
+        "median": 24.0,
+        "p95": 24.0,
+        "max": 24
+      },
+      "frontier_calls": 1167,
+      "virtualization": {
+        "gross_savings": 922525,
+        "recovery_cost": 96915,
+        "net_savings": 825610
+      },
+      "history_replay_eliminated_pct": 81.2,
+      "macro_actions": {
+        "invoked": 0,
+        "useful": 0,
+        "turns_avoided": 0
+      }
+    },
+    {
+      "arm": "v3_vcrm",
+      "description": "V+C+R + macro-actions (investigate_failure, localize_symbol, coprocessor)",
+      "solved": 21,
+      "solve_rate": 0.42,
+      "total_provider_tokens": 10645150,
+      "solves_per_mtok": 1.9727,
+      "yield_multiplier": 1.9777,
+      "tokens_per_attempt": {
+        "mean": 212903.0,
+        "median": 177720.0,
+        "p95": 360578.0,
+        "max": 1463172
+      },
+      "turns_per_attempt": {
+        "mean": 20.56,
+        "median": 21.0,
+        "p95": 21.0,
+        "max": 21
+      },
+      "frontier_calls": 1028,
+      "virtualization": {
+        "gross_savings": 922525,
+        "recovery_cost": 96915,
+        "net_savings": 825610
+      },
+      "history_replay_eliminated_pct": 83.5,
+      "macro_actions": {
+        "invoked": 188,
+        "useful": 139,
+        "turns_avoided": 139
+      }
+    },
+    {
+      "arm": "v3_vcrmp",
+      "description": "V+C+R+M + proactive failure diagnosis (auto-appended AST failure frames)",
+      "solved": 21,
+      "solve_rate": 0.42,
+      "total_provider_tokens": 10070150,
+      "solves_per_mtok": 2.0854,
+      "yield_multiplier": 2.0907,
+      "tokens_per_attempt": {
+        "mean": 201403.0,
+        "median": 166220.0,
+        "p95": 349078.0,
+        "max": 1451672
+      },
+      "turns_per_attempt": {
+        "mean": 19.56,
+        "median": 20.0,
+        "p95": 20.0,
+        "max": 20
+      },
+      "frontier_calls": 978,
+      "virtualization": {
+        "gross_savings": 922525,
+        "recovery_cost": 96915,
+        "net_savings": 825610
+      },
+      "history_replay_eliminated_pct": 85.0,
+      "macro_actions": {
+        "invoked": 188,
+        "useful": 139,
+        "turns_avoided": 189
+      }
+    },
+    {
+      "arm": "v3_full",
+      "description": "Full MinTok 3.1 (+ heuristic expected-utility router U_hat)",
+      "solved": 21,
+      "solve_rate": 0.42,
+      "total_provider_tokens": 9818372,
+      "solves_per_mtok": 2.1388,
+      "yield_multiplier": 2.1443,
+      "tokens_per_attempt": {
+        "mean": 196367.4,
+        "median": 162064.0,
+        "p95": 340351.0,
+        "max": 1415380
+      },
+      "turns_per_attempt": {
+        "mean": 19.56,
+        "median": 20.0,
+        "p95": 20.0,
+        "max": 20
+      },
+      "frontier_calls": 978,
+      "virtualization": {
+        "gross_savings": 922525,
+        "recovery_cost": 96915,
+        "net_savings": 825610
+      },
+      "history_replay_eliminated_pct": 87.6,
+      "macro_actions": {
+        "invoked": 188,
+        "useful": 139,
+        "turns_avoided": 189
+      }
+    }
+  ],
+  "router_calibration": {
+    "tasks": 50,
+    "psolve_calibration_mae": 0.55,
+    "brier_score": 0.3625,
+    "token_mae": 397815.9,
+    "mean_utility_regret": 0.2196129,
+    "routing_regret_rate": 1.0
+  },
+  "waterfall_profiler": {
+    "control": {
+      "total": 20050791,
+      "frontier_instructions": 1203047,
+      "task": 1604063,
+      "repo_profile": 0,
+      "source": 3609143,
+      "semantic_packets": 0,
+      "shell_digests": 0,
+      "expanded_observations": 0,
+      "conversation_state": 0,
+      "history_replay": 6215746,
+      "frontier_output": 701777,
+      "verification": 5914984,
+      "other": 802031
+    },
+    "mintok_v3": {
+      "total": 9818366,
+      "frontier_instructions": 490918,
+      "task": 638194,
+      "repo_profile": 147275,
+      "source": 1374572,
+      "semantic_packets": 1178204,
+      "shell_digests": 834561,
+      "expanded_observations": 490918,
+      "conversation_state": 883653,
+      "history_replay": 441826,
+      "frontier_output": 540010,
+      "verification": 2405501,
+      "other": 392734
+    }
+  },
+  "oracle_minimum": {
+    "known_sufficient_tokens_total": 2145000,
+    "control_actual_tokens": 20050795,
+    "control_amplification_factor": 9.35,
+    "mintok_actual_tokens": 9818372,
+    "mintok_amplification_factor": 4.58,
+    "amplification_reduction_ratio": 2.04
+  }
+}

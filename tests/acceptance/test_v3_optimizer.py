@@ -82,3 +82,37 @@ def check_exit_code(ctx: SimpleNamespace, code: int) -> None:
 @then(parsers.parse('the agent CLI output includes "{text}"'))
 def check_output_includes(ctx: SimpleNamespace, text: str) -> None:
     assert text in ctx.output, f"Expected '{text}' in:\n{ctx.output}"
+
+
+@when("the seven-arm ablation suite runs on the 50-task live window")
+def run_ablation_suite_step(ctx: SimpleNamespace) -> None:
+    sys.path.insert(0, str(HARNESS_ROOT / "benchmarks" / "public"))
+    from ablation_suite import run_7arm_ablation
+    ctx.ablation_results = run_7arm_ablation()
+
+
+@then(parsers.parse('all seven arms are evaluated: "{a1}", "{a2}", "{a3}", "{a4}", "{a5}", "{a6}", "{a7}"'))
+def check_all_seven_arms(ctx: SimpleNamespace, a1: str, a2: str, a3: str, a4: str, a5: str, a6: str, a7: str) -> None:
+    expected_arms = [a1, a2, a3, a4, a5, a6, a7]
+    actual_arms = [arm["arm"] for arm in ctx.ablation_results["ablation_ladder"]]
+    assert actual_arms == expected_arms, f"Expected {expected_arms}, got {actual_arms}"
+
+
+@then("the yield multiplier increases monotonically from Control to v3_full")
+def check_monotonic_yield(ctx: SimpleNamespace) -> None:
+    multipliers = [arm["yield_multiplier"] for arm in ctx.ablation_results["ablation_ladder"]]
+    for i in range(1, len(multipliers)):
+        assert multipliers[i] >= multipliers[i - 1], f"Non-monotonic yield: {multipliers}"
+
+
+@then(parsers.parse("the net observation savings exceed {min_tokens:d} tokens"))
+def check_net_virt_savings(ctx: SimpleNamespace, min_tokens: int) -> None:
+    virt = ctx.ablation_results["ablation_ladder"][1]["virtualization"]
+    assert virt["net_savings"] > min_tokens, f"Expected >{min_tokens}, got {virt['net_savings']}"
+
+
+@then(parsers.parse("the inference amplification factor is reduced by at least {min_red:f}x"))
+def check_amplification_reduction(ctx: SimpleNamespace, min_red: float) -> None:
+    om = ctx.ablation_results["oracle_minimum"]
+    assert om["amplification_reduction_ratio"] >= min_red, f"Expected >={min_red}, got {om['amplification_reduction_ratio']}"
+

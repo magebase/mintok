@@ -82,11 +82,34 @@ class PatchAssessment:
     interface_compatible: bool
 
 
+@dataclass
+class MacroActionRecord:
+    """Accounting for a locally performed macro-action and avoided frontier turns."""
+
+    macro_action: str
+    local_operations_performed: int
+    tokens_generated_locally: int
+    frontier_turns_avoided: int
+    whether_frontier_used_output: bool = True
+    whether_patch_outcome_improved: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "macro_action": self.macro_action,
+            "local_operations_performed": self.local_operations_performed,
+            "tokens_generated_locally": self.tokens_generated_locally,
+            "frontier_turns_avoided": self.frontier_turns_avoided,
+            "whether_frontier_used_output": self.whether_frontier_used_output,
+            "whether_patch_outcome_improved": self.whether_patch_outcome_improved,
+        }
+
+
 class SemanticCoprocessor:
     """Local coprocessor orchestrating deterministic inspections without frontier turns."""
 
     def __init__(self, repo_root: Path | None = None) -> None:
         self.repo_root = repo_root
+        self.action_records: list[MacroActionRecord] = []
 
     def investigate_failure(self, repo_root: Path, traceback_text: str) -> EvidencePacket:
         """Parse failure traceback, locate failing AST node, and bundle context."""

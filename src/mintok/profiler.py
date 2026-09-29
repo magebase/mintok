@@ -161,7 +161,7 @@ class TokenWaterfall:
 
 @dataclass(frozen=True, slots=True)
 class OracleMinimum:
-    """Post-hoc minimal decisive evidence chain for a task."""
+    """Post-hoc minimal known sufficient evidence chain for a task."""
 
     task_id: str
     task_tokens: int
@@ -180,9 +180,18 @@ class OracleMinimum:
             + self.verification_tokens
         )
 
+    @property
+    def known_sufficient_tokens(self) -> int:
+        """Alias for post-hoc minimal known sufficient evidence chain."""
+        return self.minimum_tokens
+
     def amplification_factor(self, actual_tokens: int) -> float:
+        """Inference amplification factor: A = T_actual / T_known-sufficient."""
         min_tok = max(1, self.minimum_tokens)
         return actual_tokens / min_tok
+
+    def inference_amplification_factor(self, actual_tokens: int) -> float:
+        return self.amplification_factor(actual_tokens)
 
 
 def profile_trajectory_waterfall(events: list[dict[str, Any]]) -> TokenWaterfall:

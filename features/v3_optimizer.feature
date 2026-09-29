@@ -32,7 +32,7 @@ Feature: MinTok 3.0 runtime inference optimizer
     Then the agent CLI exit code is 0
     And the agent CLI output includes "[evidence packet: calculate"
 
-  Scenario: Six-arm ablation ladder gates tools according to configuration
+  Scenario: Seven-arm ablation ladder gates tools according to configuration
     Given an empty trajectory log "v3_ablation.jsonl"
     And a repository with a failing function "calculate" in "calc.py"
     When the agent CLI executes tool "shell" with args "echo 'test ablation'" under policy "v3_v"
@@ -43,3 +43,14 @@ Feature: MinTok 3.0 runtime inference optimizer
     When the agent CLI executes tool "localize_symbol" with args "calculate" under policy "v3_vcrm"
     Then the agent CLI exit code is 0
     And the agent CLI output includes "[symbol packet: calculate"
+    When the agent CLI executes tool "localize_symbol" with args "calculate" under policy "v3_vcrmp"
+    Then the agent CLI exit code is 0
+    And the agent CLI output includes "[symbol packet: calculate"
+
+  Scenario: Seven-arm ablation suite generates verified performance ladder
+    When the seven-arm ablation suite runs on the 50-task live window
+    Then all seven arms are evaluated: "Control", "v3_v", "v3_vc", "v3_vcr", "v3_vcrm", "v3_vcrmp", "v3_full"
+    And the yield multiplier increases monotonically from Control to v3_full
+    And the net observation savings exceed 800000 tokens
+    And the inference amplification factor is reduced by at least 2.0x
+

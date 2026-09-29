@@ -85,3 +85,19 @@ Feature: Tool-output virtualization and observation store
     Then the observation has net positive savings
     And the observation store metrics report expansion rate greater than 0
     And the net observation compression ratio is greater than 1.0
+
+  Scenario: Multi-tier representation, recovery prediction, and action preservation
+    Given an observation store
+    When git status output is received:
+      """
+      On branch main
+      Changes not staged for commit:
+        modified:   mintok/router.py
+        modified:   mintok/virtualization.py
+      Untracked files:
+        new_test.py
+      """
+    Then the virtualized output summarizes git status with staged 0 and unstaged 2
+    And the observation tier "L0" returns only handle "obs:"
+    And the predicted expansion probability for failed test is greater than 0.70
+    And the compressed output preserves critical tokens with action invariance
