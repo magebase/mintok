@@ -1241,59 +1241,123 @@ To enforce strict data hygiene and eliminate benchmark overfitting:
 
 ---
 
-### Empirical Live SWE-rebench Evaluation: 20-Task Evaluation Subset of Frozen Window Eval 50
+### Empirical Live SWE-rebench Evaluation: Complete 50-Task Pre-Registered Holdout Window (`swe_rebench_window_eval_50.json.gz`)
 
-The 20-task evaluation subset (40 paired live runs) was executed on the first 20 tasks of `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha` with the progressive escalation controller:
+The complete 50-task evaluation window (100 paired live trajectories) was executed to completion on `swe_rebench_window_eval_50.json.gz` using `stealth/space-bunny-alpha` comparing the Control arm (unrestricted shell) against MinTok 2.0 (frozen progressive escalation controller, EscalationLevel L0–L4):
 
-#### 1. Aggregate Performance (Tasks 1–20, 40 Paired Trajectories)
+#### 1. Headline Aggregate Accounting (50 Tasks, 100 Paired Trajectories)
 
-| Metric | Control Arm (Shell) | MinTok 2.0 Arm (Adaptive) | Effect / Ratio |
+| Metric | Control Arm (Shell) | MinTok 2.0 Arm (Adaptive Escalation) | Effect / Ratio |
 |---|---|---|---|
-| **Solve Rate** | 5/20 (25.0%) | 7/20 (35.0%) | MinTok solved 7/20 vs 5/20 in this sample (+10.0pp) |
-| **Total Provider Tokens** | 8,898,903 | 6,233,856 | **-29.9% overall token reduction** (-2,665,047 tokens saved) |
-| **Tokens / Attempt (All Tasks)** | 444,945 | 311,693 | **1.43x token reduction** |
-| **Tokens / Solved (Strict Solved)** | 273,297 | 241,559 | **1.13x efficiency multiplier** |
-| **Tokens / Solved (All-Attempt Allocated)** | 1,779,781 | 890,551 | **1.999x efficiency multiplier** (exact: 1.9985x) |
-| **Solves / Million Tokens (All Spend)** | 0.5619 solves / Mtok | 1.1229 solves / Mtok | **1.999x economic yield multiplier** (exact: 1.9985x) |
-| **Both-Solved Paired Ratio (4 tasks)** | 274,596 avg | 216,195 avg | **1.33x geometric mean savings** [0.86x, 1.81x] |
-| **Gate Status** | — | — | **STRONG** (Yield $\ge 1.50\times$; unrounded 1.9985x narrowly misses 2.0000x BREAKTHROUGH) |
+| **Solve Rate** | 20/50 (40.00%) | 15/50 (30.00%) | -10.00pp solve delta [95% CI: -22.00pp, +2.00pp] |
+| **Total Provider Tokens** | 20,050,795 | 17,027,787 | **-15.08% token reduction** (-3,023,008 provider tokens saved) |
+| **Tokens / Attempt (All Tasks)** | 401,016 | 340,556 | **1.18x token reduction** |
+| **Tokens / Solved (Strict Solved)** | 273,297 avg | 241,559 avg | **1.13x efficiency multiplier** |
+| **Tokens / Solved (All-Attempt Allocated)** | 1,002,540 | 1,135,186 | 0.883x efficiency ratio |
+| **Solves / Million Tokens (All Spend)** | **0.997467** solves / Mtok | **0.880913** solves / Mtok | **0.883150x economic yield multiplier** |
+| **Both-Solved Paired Ratio (12 tasks)** | 3,923,382 total (326,949 avg) | 3,147,746 total (262,312 avg) | **1.2467x geometric mean savings** [95% CI: 1.0832x, 1.4230x] |
+| **Bootstrap 95% CI (10,000 resamples)** | — | — | **0.8832x yield** [95% CI: **0.5406x**, **1.3590x**] |
+| **Gate Status** | — | — | **DID NOT MEET MINIMUM VIABLE GATE** ($\ge 1.25\times$ required; unrounded **0.883150x**) |
 
 #### 2. Concordance & Discordance Matrix
 
+Across all 50 paired tasks, the concordance breakdown is:
+
 ```text
-paired solve breakdown (20 tasks):
-  both solve:            4  (hyp3-sdk-71 [1.60x], pelita-696 [1.23x], schematics_to_swagger-7 [1.81x], azure-activedirectory-227 [0.86x])
-  control-only solve:    1  (pelita-875)
-  mintok-only solve:     3  (pelita-863: MinTok Solved in 258k vs Control Failed in 418k;
-                            openhands-aci-55: MinTok Solved in 286k vs Control Failed in 317k;
-                            openhands-resolver-123: MinTok Solved in 281k vs Control Failed in 386k)
-  both fail:            12  (pelita-798, timeseriesflattener-186, abjad-ext-nauert-24, pyopenapi3-80,
-                            pyopenapi3-83, pyopenapi3-91, pyopenapi3-92, openhands-resolver-137,
-                            apptuit-py-10, apptuit-py-21, python-crypto-116, pando.py-586)
+paired solve breakdown (50 tasks):
+  both solve:            12  (hyp3-sdk-71 [1.60x], pelita-696 [1.23x], schematics_to_swagger-7 [1.81x],
+                              azure-activedirectory-227 [0.86x], microsoft-authentication-library-186 [1.02x],
+                              microsoft-authentication-library-795 [1.01x], iotedgedev-173 [1.32x],
+                              msrest-167 [1.47x], msrest-189 [1.32x], msrest-224 [0.92x],
+                              msrestazure-107 [1.36x], msrestazure-121 [1.72x])
+  control-only solve:     8  (pelita-875, microsoft-authentication-library-280,
+                              microsoft-authentication-library-315, microsoft-authentication-library-530,
+                              microsoft-authentication-library-723, microsoft-authentication-library-730,
+                              autorest.python-475, msrest-55)
+  mintok-only solve:      3  (pelita-863: MinTok Solved in 258k vs Control Failed in 418k;
+                              openhands-aci-55: MinTok Solved in 286k vs Control Failed in 317k;
+                              openhands-resolver-123: MinTok Solved in 281k vs Control Failed in 386k)
+  both fail:             27  (pelita-798, timeseriesflattener-186, abjad-ext-nauert-24, pyopenapi3-80,
+                              pyopenapi3-83, pyopenapi3-91, pyopenapi3-92, openhands-resolver-137,
+                              apptuit-py-10, apptuit-py-21, python-crypto-116, pando.py-586,
+                              microsoft-authentication-library-77, autorest.python-545,
+                              azure-cli-1876, azure-cli-2053, azure-cli-2214, azure-cli-2467,
+                              azure-cli-2844, azure-cli-2955, azure-cli-3354, azure-cli-3643,
+                              azure-cli-3743, azure-cli-4265, azure-functions-durable-python-494,
+                              iotedgedev-349, msrest-43)
 ```
 
-#### 3. Outlier Sensitivity Analysis (Excluding OpenHands Runaway)
+- **Statistical Significance (McNemar's Exact Test)**:
+  - Discordant pairs: 8 Control-only vs 3 MinTok-only ($b=8, c=3$).
+  - Exact two-tailed binomial $p = 0.2266$.
+  - The 10.0pp solve-rate difference is not statistically significant at $\alpha = 0.05$ (95% CI [-22.00pp, +2.00pp] spans 0.0pp).
+- **Both-Solved Geometric Mean Savings**:
+  - Across the 12 tasks both arms solved, MinTok spent fewer tokens on 10 of 12 tasks, achieving a statistically significant **1.2467x geometric mean savings** [95% CI: 1.0832x, 1.4230x].
 
-On `All-Hands-AI__openhands-resolver-137`, Control spiraled into an unrestricted shell search loop consuming **1,936,245 tokens** before failing, while MinTok's progressive escalation contained the intractable failure at **193,955 tokens** (a **9.98x token reduction**).
+#### 3. Outlier Sensitivity Analysis
 
-To test whether the economic yield is merely manufactured by a single runaway failure, we recompute all-attempt metrics excluding this pair:
+To examine how robust the economic yield is to individual token outliers, we evaluate the 50-task window excluding the largest 1, 3, and 5 token outlier pairs under three ranking methodologies:
 
-- **Control Spend (19 tasks)**: 6,962,658 tokens, 5 solves $\to$ **0.7181 solves / Mtok** (1,392,532 tokens / solve)
-- **MinTok 2.0 Spend (19 tasks)**: 6,039,901 tokens, 7 solves $\to$ **1.1589 solves / Mtok** (862,843 tokens / solve)
-- **Adjusted Economic Yield**: $\frac{1.1589}{0.7181} \approx \mathbf{1.61\times}$
+| Ranking Methodology | Outliers Excluded | Control Spend | MinTok Spend | Token Savings | Control Solves/Mtok | MinTok Solves/Mtok | Economic Yield |
+|---|---|---|---|---|---|---|---|
+| **Combined Tokens ($T_C + T_M$)** | Top 1 (`openhands-resolver-137`) | 18,114,550 | 16,833,832 | 7.07% | 1.1041 | 0.8911 | **0.807060x** |
+| | Top 3 (+ `azure-cli-2053`, `pelita-798`) | 17,024,864 | 15,506,311 | 8.92% | 1.1748 | 0.9673 | **0.823448x** |
+| | Top 5 (+ `msal-730`, `msal-77`) | 15,809,920 | 14,424,212 | 8.76% | 1.2018 | 1.0399 | **0.865317x** |
+| **Control Tokens ($T_C$)** | Top 1 (`openhands-resolver-137`) | 18,114,550 | 16,833,832 | 7.07% | 1.1041 | 0.8911 | **0.807060x** |
+| | Top 3 (+ `msal-77`, `pando.py-586`) | 16,749,776 | 16,169,053 | 3.47% | 1.1940 | 0.9277 | **0.776937x** |
+| | Top 5 (+ `azure-cli-3743`, `azure-cli-2955`) | 15,555,325 | 15,450,185 | 0.68% | 1.2857 | 0.9709 | **0.755104x** |
+| **Token Discrepancy ($\|T_C - T_M\|$)** | Top 1 (`openhands-resolver-137`) | 18,114,550 | 16,833,832 | 7.07% | 1.1041 | 0.8911 | **0.807060x** |
+| | Top 3 (+ `pando.py-586`, `azure-cli-3743`) | 16,830,861 | 16,319,163 | 3.04% | 1.1883 | 0.9192 | **0.773517x** |
+| | Top 5 (+ `apptuit-py-10`, `msal-77`) | 16,026,489 | 15,481,041 | 3.40% | 1.2479 | 0.9689 | **0.776425x** |
 
-Even after removing the catastrophic Control runaway, MinTok 2.0 delivers a **1.61x economic yield**, comfortably exceeding the **STRONG** gate ($\ge 1.50\times$).
+**Interpretation**:
+1. On `openhands-resolver-137`, Control spiraled into an unrestricted 1.94M token loop, whereas MinTok bounded the failure at 194k tokens (a 1.74M token reduction).
+2. When this single extreme failure is excluded, the economic yield drops to **0.807x**; removing top 3 and top 5 outliers keeps the yield tightly bounded between **0.755x and 0.865x**.
+3. Across all subsets, MinTok consistently saves provider tokens (spending 7–15% fewer tokens overall), but the 10pp solve rate drop across tasks 21–50 dampens all-attempt economic yield below 1.0x.
 
-#### 4. Key Empirical Findings: Resolving the Exploration vs Pruning Tradeoff
+#### 4. Escalation Telemetry Analysis
 
-1. **Statistically Rigorous Sample Yield**: Across this 20-task evaluation subset, MinTok achieved **1.1229 solves / Mtok** vs Control's **0.5619 solves / Mtok**, an unrounded **1.9985x economic yield** (**1.999x**, certified **STRONG Gate**).
-2. **Conservative Capability Claim**: MinTok solved 7/20 tasks vs Control's 5/20 in this sample. With only 4 discordant outcomes (3 MinTok rescues vs 1 Control-only solve), this is promising sample evidence that bounded semantic context prevents wandering, but is insufficient evidence to assert a generalized capability improvement. Both-solved geometric mean savings is **1.33x** [95% CI: 0.86x, 1.81x].
-3. **Three MinTok-Only Rescues**:
-   - `ASPP__pelita-863`: MinTok's targeted discovery located `test/test_team.py`, and stagnation fallback cleanly repaired the issue in 258,984 tokens while Control corrupted git history in 418,592 tokens.
-   - `All-Hands-AI__openhands-aci-55`: MinTok bounded exploration to relevant schema classes and passed in 286,004 tokens; Control timed out wandering through bash subprocesses in 317,377 tokens.
-   - `All-Hands-AI__openhands-resolver-123`: MinTok localized the git conflict resolver in 281,146 tokens; Control failed in 386,375 tokens.
-4. **Catastrophic Failure Bounding**: Real agent deployments pay for failures. MinTok avoids unbounded shell loops on impossible tasks without blinding the agent on solvable ones.
-5. **Frozen Holdout Continuation**: This 20-task run represents the initial evaluated subset of the pre-registered 50-task window `swe_rebench_window_eval_50.json.gz`. The remaining 30 tasks are evaluated under the identical frozen policy.
+Analyzing the in-process telemetry across all 50 MinTok trajectories reveals critical insights into escalation mechanics:
+
+- **Level Distribution**:
+  - Reaching Level 0 (`SLICE_BOUNDED`): 50/50 (100.0%)
+  - Reaching Level 1 (`BROADEN`): 50/50 (100.0%)
+  - Reaching Level 2 (`TRACE_SLICED`): 50/50 (100.0%)
+  - Reaching Level 3 (`TARGETED_DISCOVERY`): 50/50 (100.0%)
+  - Reaching Level 4 (`FULL_FALLBACK`): 50/50 (100.0%)
+- **Turns Allocation**:
+  - Total Trajectory Turns: 1,772 turns across 50 tasks.
+  - Pre-L4 Turns (Semantic L0–L3): 356 turns (**20.1%**, average 7.1 turns/task).
+  - Post-L4 Turns (Unrestricted Shell L4): 1,416 turns (**79.9%**, average 28.3 turns/task).
+- **Rescue vs Wasted Escalation Rates**:
+  - Solved strictly within L0–L3: **0 tasks** (0.0%).
+  - Solved after escalating to L4 (**Rescues**): **15 tasks** (30.0% rescue rate among escalated tasks).
+  - Escalated to L4 but failed (**Wasted Escalation**): **35 tasks** (70.0% of escalated tasks).
+- **Root Cause of the 20-Task vs 50-Task Trajectory Flip**:
+  - On the first 20 tasks, MinTok achieved 1.999x yield (7/20 vs 5/20 solves, -29.9% tokens), driven by 3 rescues and bounding the 1.94M token runaway.
+  - On tasks 21–50 (heavily dominated by Azure CLI and SDK repositories: `azure-cli`, `msal`, `autorest`, `msrest`), Control resolved 15/30 tasks while MinTok resolved 8/30.
+  - In deep, multi-package Azure repositories with non-standard test runners and complex workspace directory trees, spending the initial 7 turns in bounded semantic slicing without full bash shell access consumed turn budget and confused the agent's mental model before L4 unlocked. By the time L4 was unlocked at turn 8, the model had fewer remaining turns to navigate the build harnesses, resulting in 8 Control-only solves.
+
+#### 5. Post-Hoc Oracle Policy Analysis
+
+Using MinTok's exact offline `oracle_router` implementation ([`src/mintok/metrics.py`](file:///home/aqua/Projects/MinTok/src/mintok/metrics.py)), we compute the theoretical upper-bound performance achievable by an ideal per-task arm selector:
+
+| Policy | Solved / 50 | Total Provider Tokens | Tokens / Attempt | Tokens / Solved | Solves / Mtok | Yield vs Control |
+|---|---|---|---|---|---|---|
+| **Uniform Control (Shell)** | 20 (40.0%) | 20,050,795 | 401,016 | 1,002,540 | 0.997467 | 1.0000x |
+| **Uniform MinTok 2.0 (Adaptive)** | 15 (30.0%) | 17,027,787 | 340,556 | 1,135,186 | 0.880913 | 0.8831x |
+| **Post-Hoc Oracle Router** | **23 (46.0%)** | **15,122,688** | **302,454** | **657,508** | **1.520894** | **1.5248x** |
+
+- **Optimal Routing Decisions**:
+  - Routed to MinTok: **24 tasks (48.0%)**
+  - Routed to Control: **26 tasks (52.0%)**
+- **Oracle Findings**:
+  - An ideal policy achieves **1.5248x economic yield** over Control (+52.5% yield gain) while increasing overall solve rate from 40% to 46% and reducing token spend by 24.6%.
+  - This demonstrates that substantial efficiency headroom exists in combining semantic context with standard shell tooling, but static rule-based heuristic escalation (`turns_without_patch >= 8`) is too rigid to realize this headroom dynamically.
+  - **Architectural Directive for MinTok 3.0**: To bridge the gap from 0.883x to the 1.525x oracle upper bound, MinTok must evolve from heuristic stage-gating to:
+    1. **Token-ledger-aware escalation**: dynamic probabilistic escalation conditioned on real-time token spend and repository tree depth.
+    2. **Tool-output virtualization**: compacting shell output rather than withholding shell access entirely.
+    3. **Conversation-state compilation**: compiling turn history into semantic checkpoint summaries to avoid turn-budget starvation.
 
 Durable Run Record: [`swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json).
 
