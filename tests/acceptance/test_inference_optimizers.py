@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,12 +29,25 @@ from mintok.conversation import (
     compute_state_delta,
     evaluate_cache_aware_compaction_benefit,
 )
-from mintok.coprocessor import PacketUtilityTracker
+from mintok.coprocessor import (
+    PacketUtilityTracker,
+    compute_retrieval_consensus,
+    recommended_packet_budget,
+)
 from mintok.early_stop import CleanContextRestart, ContinuationPredictor
-from mintok.metrics import ProviderPricing, TokenUsageBreakdown
+from mintok.metrics import (
+    PricingTable,
+    ProviderPricing,
+    TokenUsageBreakdown,
+    decisive_evidence_density,
+    frontier_call_elimination_ratio,
+    information_reuse_multiplier,
+    post_decisive_efficiency,
+)
 from mintok.profiler import LostSolveCategory, attribute_lost_solve
 from mintok.source_cache import RegionStatus, SourceCache
 from mintok.verification import (
+    DependencyExactCacheKey,
     PassVerificationCache,
     VerificationCompiler,
     VerificationSafetyTracker,
@@ -583,4 +597,263 @@ def when_attributing_lost_solve(ctx: SimpleNamespace) -> None:
 def check_attribution_category(ctx: SimpleNamespace, expected: str) -> None:
     assert ctx.attribution is not None
     assert ctx.attribution.category == expected
+
+
+# ---------------------------------------------------------------------------
+# Scenario 18: Wilson 95% UCB Miss Rate
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse("{events:d} verification events occur with {false_passes:d} false passes and {failures:d} broader failures"))
+def when_verification_events_with_false_passes(ctx: SimpleNamespace, events: int, false_passes: int, failures: int) -> None:
+    for i in range(events):
+        fp = i < false_passes
+        bf = i < failures
+        # If fp is True, selected_passed=True and broader_passed=False (false pass)
+        # If bf is True and not fp, selected_passed=False and broader_passed=False (true failure detection)
+        # Otherwise both passed
+        selected_passed = fp or (not bf)
+        broader_passed = not bf
+        ctx.safety_tracker.record_event(selected_passed=selected_passed, broader_passed=broader_passed)
+
+
+@then(parsers.parse("the empirical miss rate is {expected:f}"))
+def check_empirical_miss_rate(ctx: SimpleNamespace, expected: float) -> None:
+    assert math.isclose(ctx.safety_tracker.miss_rate, expected, abs_tol=1e-3)
+
+
+@then(parsers.parse("the Wilson 95% upper bound miss rate is greater than {threshold:f}"))
+def check_wilson_ucb_95(ctx: SimpleNamespace, threshold: float) -> None:
+    assert ctx.safety_tracker.wilson_ucb_95 > threshold
+
+
+# ---------------------------------------------------------------------------
+# Scenario 19: Dependency-Exact Cache Key
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse('a test passes with test hash "{th}", dependency hash "{dh}", and config hash "{ch}"'))
+def when_test_passes_exact(ctx: SimpleNamespace, th: str, dh: str, ch: str) -> None:
+    ctx.exact_key = DependencyExactCacheKey(
+        test_id="tests/test_mod.py::test_case",
+        test_code_hash=th,
+        transitive_dependency_hash=dh,
+        config_hash=ch,
+    )
+    ctx.pass_cache.record_pass_exact(ctx.exact_key)
+
+
+@then(parsers.parse('the test is cached as passing for test hash "{th}", dependency hash "{dh}", and config hash "{ch}"'))
+def check_test_cached_exact(ctx: SimpleNamespace, th: str, dh: str, ch: str) -> None:
+    key = DependencyExactCacheKey(
+        test_id="tests/test_mod.py::test_case",
+        test_code_hash=th,
+        transitive_dependency_hash=dh,
+        config_hash=ch,
+    )
+    assert ctx.pass_cache.is_pass_exact(key)
+
+
+@then(parsers.parse('the test is not cached if dependency hash changes to "{dh}"'))
+def check_test_not_cached_exact(ctx: SimpleNamespace, dh: str) -> None:
+    changed_key = DependencyExactCacheKey(
+        test_id="tests/test_mod.py::test_case",
+        test_code_hash=ctx.exact_key.test_code_hash,
+        transitive_dependency_hash=dh,
+        config_hash=ctx.exact_key.config_hash,
+    )
+    assert not ctx.pass_cache.is_pass_exact(changed_key)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 20: Generational Context Promotion
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse('a context rent manager with an admitted object with lease "{lease}"'))
+def given_rent_manager_admitted(ctx: SimpleNamespace, lease: str) -> None:
+    ctx.rent_manager = ContextRentManager()
+    lifetime = getattr(ContextLifetime, lease)
+    ctx.rent_manager.admit(
+        ContextObject(
+            id="obj_lease_1",
+            content="some context",
+            tokens=50,
+            lifetime=lifetime,
+            created_turn=1,
+            decision_value=1.0,
+        )
+    )
+
+
+@when(parsers.parse("the object is retained across {turns:d} subsequent turns"))
+def when_object_retained(ctx: SimpleNamespace, turns: int) -> None:
+    for t in range(2, 2 + turns):
+        ctx.rent_manager.record_reference("obj_lease_1", current_turn=t)
+
+
+@then(parsers.parse('its lease is promoted to "{expected_lease}"'))
+def check_promoted_lease(ctx: SimpleNamespace, expected_lease: str) -> None:
+    obj = ctx.rent_manager.active_objects()[0]
+    expected_lifetime = getattr(ContextLifetime, expected_lease)
+    assert obj.lifetime == expected_lifetime
+
+
+# ---------------------------------------------------------------------------
+# Scenario 21: Context Pressure Eviction
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse("a context rent manager with objects total {total_tokens:d} tokens"))
+def given_rent_manager_pressure(ctx: SimpleNamespace, total_tokens: int) -> None:
+    ctx.rent_manager = ContextRentManager()
+    ctx.rent_manager.admit(
+        ContextObject(
+            id="obj_a",
+            content="chunk a",
+            tokens=500,
+            lifetime=ContextLifetime.TASK_LONG,
+            decision_value=0.2,
+        )
+    )
+    ctx.rent_manager.admit(
+        ContextObject(
+            id="obj_b",
+            content="chunk b",
+            tokens=500,
+            lifetime=ContextLifetime.TASK_LONG,
+            decision_value=0.5,
+        )
+    )
+    ctx.rent_manager.admit(
+        ContextObject(
+            id="obj_c",
+            content="chunk c",
+            tokens=500,
+            lifetime=ContextLifetime.TASK_LONG,
+            decision_value=0.9,
+        )
+    )
+
+
+@when(parsers.parse("evicting under context pressure with budget {budget:d} tokens"))
+def when_evict_under_pressure(ctx: SimpleNamespace, budget: int) -> None:
+    ctx.evicted = ctx.rent_manager.evict_under_pressure(budget_tokens=budget)
+
+
+@then(parsers.parse("the resident tokens after eviction are at most {budget:d} tokens"))
+def check_resident_tokens(ctx: SimpleNamespace, budget: int) -> None:
+    remaining_tokens = sum(o.tokens for o in ctx.rent_manager.active_objects())
+    assert remaining_tokens <= budget
+
+
+# ---------------------------------------------------------------------------
+# Scenario 22: Retrieval Consensus Scoring
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse('three retrievers with nominations "{n1}", "{n2}", and "{n3}"'))
+def given_three_retrievers(ctx: SimpleNamespace, n1: str, n2: str, n3: str) -> None:
+    ctx.nominations = [
+        set(n1.split(",")),
+        set(n2.split(",")),
+        set(n3.split(",")),
+    ]
+
+
+@when("retrieval consensus is computed")
+def when_compute_retrieval_consensus(ctx: SimpleNamespace) -> None:
+    ctx.consensus = compute_retrieval_consensus(ctx.nominations)
+    ctx.rec_budget, ctx.rec_policy = recommended_packet_budget(ctx.consensus)
+
+
+@then(parsers.parse("the consensus score is between {low:f} and {high:f}"))
+def check_consensus_range(ctx: SimpleNamespace, low: float, high: float) -> None:
+    assert low <= ctx.consensus <= high
+
+
+@then(parsers.parse("the recommended packet budget is {budget:d} tokens"))
+def check_recommended_budget(ctx: SimpleNamespace, budget: int) -> None:
+    assert ctx.rec_budget == budget
+
+
+# ---------------------------------------------------------------------------
+# Scenario 23: Pricing Table Decoupled Hash
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse('a pricing table for provider "{prov}" model "{model}"'))
+def given_pricing_table(ctx: SimpleNamespace, prov: str, model: str) -> None:
+    ctx.pricing_table = PricingTable(provider=prov, model=model)
+
+
+@when("computing the pricing table hash")
+def when_computing_pricing_hash(ctx: SimpleNamespace) -> None:
+    ctx.table_hash = ctx.pricing_table.pricing_table_hash()
+
+
+@then(parsers.parse("the hash length is {length:d} characters"))
+def check_hash_length(ctx: SimpleNamespace, length: int) -> None:
+    assert len(ctx.table_hash) == length
+
+
+@then("altering model price changes the table hash")
+def check_altered_table_hash(ctx: SimpleNamespace) -> None:
+    altered = PricingTable(
+        provider=ctx.pricing_table.provider,
+        model=ctx.pricing_table.model,
+        fresh_input_price=ctx.pricing_table.fresh_input_price + 0.50,
+    )
+    assert altered.pricing_table_hash() != ctx.table_hash
+
+
+# ---------------------------------------------------------------------------
+# Scenario 24: Inference Metrics (FER, DED, PDE)
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse("evaluating {mintok:d} mintok frontier calls versus {control:d} control calls"))
+def when_evaluating_fer(ctx: SimpleNamespace, mintok: int, control: int) -> None:
+    ctx.fer = frontier_call_elimination_ratio(mintok, control)
+
+
+@then(parsers.parse("the frontier call elimination ratio is {expected:f}"))
+def check_fer(ctx: SimpleNamespace, expected: float) -> None:
+    assert math.isclose(ctx.fer, expected, abs_tol=1e-3)
+
+
+@when(parsers.parse("evaluating {decisive:d} decisive tokens with {search:d} search tokens before"))
+def when_evaluating_ded(ctx: SimpleNamespace, decisive: int, search: int) -> None:
+    ctx.ded = decisive_evidence_density(decisive, search)
+
+
+@then(parsers.parse("the decisive evidence density is {expected:f}"))
+def check_ded(ctx: SimpleNamespace, expected: float) -> None:
+    assert math.isclose(ctx.ded, expected, abs_tol=1e-3)
+
+
+@when(parsers.parse("evaluating {post:d} post-decisive tokens out of {total:d} total tokens"))
+def when_evaluating_pde(ctx: SimpleNamespace, post: int, total: int) -> None:
+    ctx.pde = post_decisive_efficiency(post, total)
+
+
+@then(parsers.parse("the post-decisive efficiency is {expected:f}"))
+def check_pde(ctx: SimpleNamespace, expected: float) -> None:
+    assert math.isclose(ctx.pde, expected, abs_tol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 25: Lost Solve Attribution Evidence Requirement
+# ---------------------------------------------------------------------------
+
+
+@when("attributing a lost solve without virtualization error logs or token truncations")
+def when_attributing_without_evidence(ctx: SimpleNamespace) -> None:
+    ctx.attribution = attribute_lost_solve(
+        task_id="task_novirt",
+        control_solved=True,
+        mintok_solved=False,
+        virtualization_omitted=True,
+        evidence={},
+    )
 

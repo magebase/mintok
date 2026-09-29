@@ -7,6 +7,7 @@ frontier exploration across repeated tasks on the same codebase.
 
 from __future__ import annotations
 
+from enum import Enum
 import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -237,3 +238,77 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
         ci_conventions=ci,
         metrics=metrics,
     )
+
+
+class RepoEvaluationTier(str, Enum):
+    """Lifecycle tier for evaluation and context residency in repository tasks."""
+
+    COLD = "cold"  # Zero prior knowledge; full discovery, ast indexing, profile scan required
+    WARM = "warm"  # Profile & symbol index available from disk cache; no test history
+    HOT = "hot"    # Profile, symbol index, test mappings, and failure modes resident in memory
+
+
+@dataclass
+class KnowledgeArtifact:
+    """A unit of durable repository knowledge (e.g. AST map, test map, ripple cache)."""
+
+    artifact_id: str
+    creation_tokens: int
+    uses_count: int = 0
+    tokens_saved_estimate: int = 0
+    created_at_tier: RepoEvaluationTier = RepoEvaluationTier.COLD
+
+
+class InformationReuseTracker:
+    """Tracks reuse of repository profiles, symbols, and test mappings across tasks."""
+
+    def __init__(self, repo_name: str) -> None:
+        self.repo_name = repo_name
+        self.artifacts: dict[str, KnowledgeArtifact] = {}
+        self.tier: RepoEvaluationTier = RepoEvaluationTier.COLD
+
+    def register_creation(
+        self,
+        artifact_id: str,
+        creation_tokens: int,
+        tier: RepoEvaluationTier | None = None,
+    ) -> None:
+        self.artifacts[artifact_id] = KnowledgeArtifact(
+            artifact_id=artifact_id,
+            creation_tokens=max(1, creation_tokens),
+            uses_count=0,
+            tokens_saved_estimate=0,
+            created_at_tier=tier or self.tier,
+        )
+
+    def record_reuse(self, artifact_id: str, tokens_saved: int = 0) -> None:
+        if artifact_id not in self.artifacts:
+            self.register_creation(artifact_id, creation_tokens=100)
+        art = self.artifacts[artifact_id]
+        art.uses_count += 1
+        art.tokens_saved_estimate += tokens_saved
+
+    def set_tier(self, tier: RepoEvaluationTier) -> None:
+        self.tier = tier
+
+    def compute_irm(self) -> float:
+        """Information Reuse Multiplier = total_uses / max(1, total_creation_tokens)."""
+        total_uses = sum(a.uses_count for a in self.artifacts.values())
+        total_creation = sum(a.creation_tokens for a in self.artifacts.values())
+        return float(total_uses) / float(max(1, total_creation))
+
+    def total_tokens_saved(self) -> int:
+        return sum(a.tokens_saved_estimate for a in self.artifacts.values())
+
+    def summary(self) -> dict[str, Any]:
+        total_creation = sum(a.creation_tokens for a in self.artifacts.values())
+        total_uses = sum(a.uses_count for a in self.artifacts.values())
+        return {
+            "repo_name": self.repo_name,
+            "tier": self.tier.value,
+            "artifacts_count": len(self.artifacts),
+            "total_creation_tokens": total_creation,
+            "total_reuse_count": total_uses,
+            "total_tokens_saved": self.total_tokens_saved(),
+            "irm": self.compute_irm(),
+        }

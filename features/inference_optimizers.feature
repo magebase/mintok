@@ -107,3 +107,49 @@ Feature: MinTok 3.1 advanced inference optimization mechanisms
     When attributing a lost solve where the task was early stopped
     Then the attribution category is "premature_early_stop"
 
+  Scenario: Verification safety tracker calculates Wilson 95% upper confidence bound
+    Given a verification safety tracker
+    When 8 verification events occur with 0 false passes and 8 broader failures
+    Then the empirical miss rate is 0.0
+    And the Wilson 95% upper bound miss rate is greater than 0.25
+
+  Scenario: Dependency-exact verification cache invalidates on transitive dependency changes
+    Given a passing verification cache
+    When a test passes with test hash "test_1", dependency hash "dep_1", and config hash "cfg_1"
+    Then the test is cached as passing for test hash "test_1", dependency hash "dep_1", and config hash "cfg_1"
+    And the test is not cached if dependency hash changes to "dep_2"
+
+  Scenario: Context rent manager promotes lifetime generationally upon repeated turns
+    Given a context rent manager with an admitted object with lease "ONE_TURN"
+    When the object is retained across 2 subsequent turns
+    Then its lease is promoted to "UNTIL_TEST"
+
+  Scenario: Context rent manager evicts low utility objects under context pressure
+    Given a context rent manager with objects total 1500 tokens
+    When evicting under context pressure with budget 1000 tokens
+    Then the resident tokens after eviction are at most 1000 tokens
+
+  Scenario: Coprocessor computes consensus across multiple retrievers
+    Given three retrievers with nominations "auth,session,user", "auth,session,tokens", and "auth,session"
+    When retrieval consensus is computed
+    Then the consensus score is between 0.40 and 0.75
+    And the recommended packet budget is 650 tokens
+
+  Scenario: Pricing table computes stable content hash decoupled from raw usage
+    Given a pricing table for provider "openrouter" model "anthropic/claude-3.5-sonnet"
+    When computing the pricing table hash
+    Then the hash length is 12 characters
+    And altering model price changes the table hash
+
+  Scenario: Inference metrics evaluate frontier call elimination and evidence density
+    When evaluating 15 mintok frontier calls versus 30 control calls
+    Then the frontier call elimination ratio is 0.50
+    When evaluating 200 decisive tokens with 800 search tokens before
+    Then the decisive evidence density is 0.25
+    When evaluating 300 post-decisive tokens out of 1000 total tokens
+    Then the post-decisive efficiency is 0.30
+
+  Scenario: Lost solve attribution requires concrete evidence before assigning virtualization blame
+    When attributing a lost solve without virtualization error logs or token truncations
+    Then the attribution category is "undetermined"
+

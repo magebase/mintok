@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import time
 from dataclasses import asdict, dataclass, field
@@ -389,37 +390,67 @@ class ContextLifetime:
     ONE_TURN = "one-turn"
     UNTIL_TEST = "until-test"
     UNTIL_PATCH = "until-patch"
+    UNTIL_HYPOTHESIS_RESOLVED = "until-hypothesis-resolved"
+    UNTIL_SYMBOL_CHANGED = "until-symbol-changed"
+    UNTIL_FAILURE_SIGNATURE_CHANGED = "until-failure-signature-changed"
+    UNTIL_PHASE_EXIT = "until-phase-exit"
+    UNTIL_INFORMATION_CHANGE = "until-information-change"
     TASK_LONG = "task-long"
     REPO_LONG = "repo-long"
 
 
 @dataclass(frozen=True, slots=True)
 class ContextObject:
-    """An allocated context object subject to economic rent and lifecycle lease."""
+    """An allocated context object subject to economic rent, utility decay, and generational leases."""
 
     id: str
     content: str
     tokens: int
     lifetime: str = ContextLifetime.TASK_LONG
     created_turn: int = 1
+    last_accessed_turn: int = 1
+    times_referenced: int = 0
+    state_transitions_caused: int = 0
     associated_hypothesis: str | None = None
     associated_symbols: tuple[str, ...] = ()
     expected_future_replays: int = 10
     decision_value: float = 1.0
+    is_dirty: bool = False
+    residency_probabilities: tuple[float, ...] = ()
+    decay_gamma: float = 0.05
 
     @property
     def rent(self) -> int:
         """Rent = tokens * expected future replays."""
         return self.tokens * self.expected_future_replays
 
+    def probabilistic_rent(self, cost_multipliers: list[float] | None = None) -> float:
+        """Rent(c) = tokens(c) * sum_{t=1}^H P(resident_t) * CostMultiplier_t."""
+        if self.residency_probabilities:
+            h = len(self.residency_probabilities)
+            mults = cost_multipliers if (cost_multipliers and len(cost_multipliers) >= h) else [1.0] * h
+            return float(self.tokens) * sum(p * m for p, m in zip(self.residency_probabilities, mults))
+        return float(self.rent)
+
+    def current_utility(self, current_turn: int) -> float:
+        """Utility_t(c) = Utility_0(c) * exp(-gamma * delta_t) boosted by reference count."""
+        delta_t = max(0, current_turn - self.last_accessed_turn)
+        base = self.decision_value * math.exp(-self.decay_gamma * delta_t)
+        boost = 1.0 + 0.2 * min(5, self.times_referenced)
+        return round(base * boost, 4)
+
     @property
     def score(self) -> float:
         """Lifetime-adjusted value: expected decision value / rent."""
         return self.decision_value / float(max(1, self.rent))
 
+    def admission_score(self, delta_p_solve: float, expected_cost: float) -> float:
+        """AdmissionScore(c) = E[Delta P(success) | c] / E[cost(c)]."""
+        return delta_p_solve / max(0.000001, expected_cost)
+
 
 class ContextRentManager:
-    """Inference memory allocator: manages context leases, rent, and event-driven eviction."""
+    """Inference memory allocator: manages context leases, generational promotion, and context pressure."""
 
     def __init__(self, rent_threshold: float = 0.0001) -> None:
         self.rent_threshold = rent_threshold
@@ -438,6 +469,66 @@ class ContextRentManager:
     def active_objects(self) -> list[ContextObject]:
         return list(self._objects.values())
 
+    def record_reference(self, obj_id: str, current_turn: int) -> ContextObject | None:
+        """Record usage of a context object, updating recency and applying generational promotion."""
+        obj = self._objects.get(obj_id)
+        if not obj:
+            return None
+        refs = obj.times_referenced + 1
+        new_lifetime = obj.lifetime
+
+        # Generational promotion: ONE_TURN -> UNTIL_TEST -> TASK_LONG
+        if obj.lifetime == ContextLifetime.ONE_TURN and refs >= 2:
+            new_lifetime = ContextLifetime.UNTIL_TEST
+        elif obj.lifetime == ContextLifetime.UNTIL_TEST and refs >= 4:
+            new_lifetime = ContextLifetime.TASK_LONG
+
+        updated = ContextObject(
+            id=obj.id,
+            content=obj.content,
+            tokens=obj.tokens,
+            lifetime=new_lifetime,
+            created_turn=obj.created_turn,
+            last_accessed_turn=current_turn,
+            times_referenced=refs,
+            state_transitions_caused=obj.state_transitions_caused,
+            associated_hypothesis=obj.associated_hypothesis,
+            associated_symbols=obj.associated_symbols,
+            expected_future_replays=obj.expected_future_replays,
+            decision_value=obj.decision_value,
+            is_dirty=obj.is_dirty,
+            residency_probabilities=obj.residency_probabilities,
+            decay_gamma=obj.decay_gamma,
+        )
+        self._objects[obj_id] = updated
+        return updated
+
+    def mark_dirty(self, modified_symbols: list[str] | set[str]) -> list[str]:
+        """Mark context objects derived from modified symbols as DIRTY."""
+        sym_set = set(modified_symbols)
+        dirty_ids = []
+        for obj_id, obj in list(self._objects.items()):
+            if any(s in sym_set for s in obj.associated_symbols):
+                self._objects[obj_id] = ContextObject(
+                    id=obj.id,
+                    content=obj.content,
+                    tokens=obj.tokens,
+                    lifetime=obj.lifetime,
+                    created_turn=obj.created_turn,
+                    last_accessed_turn=obj.last_accessed_turn,
+                    times_referenced=obj.times_referenced,
+                    state_transitions_caused=obj.state_transitions_caused,
+                    associated_hypothesis=obj.associated_hypothesis,
+                    associated_symbols=obj.associated_symbols,
+                    expected_future_replays=obj.expected_future_replays,
+                    decision_value=obj.decision_value,
+                    is_dirty=True,
+                    residency_probabilities=obj.residency_probabilities,
+                    decay_gamma=obj.decay_gamma,
+                )
+                dirty_ids.append(obj_id)
+        return dirty_ids
+
     def step_turn(self) -> list[str]:
         """Advance turn, decaying replays and evicting expired ONE_TURN leases."""
         evicted = []
@@ -453,28 +544,47 @@ class ContextRentManager:
                 tokens=obj.tokens,
                 lifetime=obj.lifetime,
                 created_turn=obj.created_turn,
+                last_accessed_turn=obj.last_accessed_turn,
+                times_referenced=obj.times_referenced,
+                state_transitions_caused=obj.state_transitions_caused,
                 associated_hypothesis=obj.associated_hypothesis,
                 associated_symbols=obj.associated_symbols,
                 expected_future_replays=replays,
                 decision_value=obj.decision_value,
+                is_dirty=obj.is_dirty,
+                residency_probabilities=obj.residency_probabilities,
+                decay_gamma=obj.decay_gamma,
             )
         self._objects = updated
         return evicted
 
     def on_event(self, event_type: str, payload: Any = None) -> list[str]:
-        """Event-triggered eviction (e.g. hypothesis rejected, patch modified, test passed)."""
+        """Event-triggered eviction (e.g. hypothesis rejected/resolved, patch/symbol modified, test passed)."""
         evicted = []
         remaining = {}
+        payload_str = str(payload or "")
+        modified_syms = set(payload) if isinstance(payload, (list, tuple, set)) else {payload_str}
+
         for obj_id, obj in self._objects.items():
             should_evict = False
-            if event_type == "hypothesis_rejected" and obj.associated_hypothesis == str(payload):
-                should_evict = True
+            if event_type in ("hypothesis_rejected", "hypothesis_resolved"):
+                if obj.associated_hypothesis == payload_str or obj.lifetime == ContextLifetime.UNTIL_HYPOTHESIS_RESOLVED:
+                    should_evict = True
             elif event_type == "test_passed" and obj.lifetime == ContextLifetime.UNTIL_TEST:
                 should_evict = True
-            elif event_type == "patch_changed" and payload:
-                modified_syms = set(payload) if isinstance(payload, (list, tuple, set)) else {str(payload)}
-                if any(sym in modified_syms for sym in obj.associated_symbols):
+            elif event_type in ("patch_changed", "symbol_changed"):
+                if obj.lifetime == ContextLifetime.UNTIL_PATCH:
                     should_evict = True
+                elif obj.lifetime == ContextLifetime.UNTIL_SYMBOL_CHANGED and any(s in modified_syms for s in obj.associated_symbols):
+                    should_evict = True
+                elif payload and any(sym in modified_syms for sym in obj.associated_symbols):
+                    should_evict = True
+            elif event_type == "failure_signature_changed" and obj.lifetime == ContextLifetime.UNTIL_FAILURE_SIGNATURE_CHANGED:
+                should_evict = True
+            elif event_type == "phase_exit" and obj.lifetime == ContextLifetime.UNTIL_PHASE_EXIT:
+                should_evict = True
+            elif event_type == "information_changed" and obj.lifetime == ContextLifetime.UNTIL_INFORMATION_CHANGE:
+                should_evict = True
 
             if should_evict:
                 evicted.append(obj_id)
@@ -482,6 +592,28 @@ class ContextRentManager:
                 remaining[obj_id] = obj
 
         self._objects = remaining
+        return evicted
+
+    def evict_under_pressure(self, budget_tokens: int, current_turn: int = 1) -> list[str]:
+        """When context pressure exceeds budget, evict lowest (utility / carrying_cost) objects."""
+        total_tokens = sum(o.tokens for o in self._objects.values())
+        if total_tokens <= budget_tokens:
+            return []
+
+        # Rank by (utility / rent) ascending -> evict lowest value-to-cost first
+        ranked = sorted(
+            self._objects.values(),
+            key=lambda o: (o.current_utility(current_turn) / float(max(1, o.rent)), -o.tokens)
+        )
+
+        evicted = []
+        for obj in ranked:
+            if total_tokens <= budget_tokens:
+                break
+            evicted.append(obj.id)
+            total_tokens -= obj.tokens
+            self._objects.pop(obj.id, None)
+
         return evicted
 
 

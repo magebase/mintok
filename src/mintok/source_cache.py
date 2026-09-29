@@ -22,6 +22,7 @@ from mintok.tokens import estimate_tokens
 class RegionStatus:
     SEEN = "SEEN"          # Seen previously, but evicted from active model context
     RESIDENT = "RESIDENT"  # Currently resident in compiled model context
+    SALIENT = "SALIENT"    # Actively resident AND fresh/high-attention enough to act on
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,8 @@ class SourceRegion:
     tokens: int
     content: str = ""
     status: str = RegionStatus.RESIDENT
+    last_referenced_turn: int = 1
+    reference_count: int = 1
 
 
 class SourceCache:
@@ -65,7 +68,7 @@ class SourceCache:
         return max(0.0, 1.0 - (overlap_lines / total_lines))
 
     def mark_evicted(self, src_id: str) -> None:
-        """Evict a region from resident prompt context (transitions RESIDENT -> SEEN)."""
+        """Evict a region from resident prompt context (transitions RESIDENT/SALIENT -> SEEN)."""
         reg = self._regions_by_id.get(src_id)
         if not reg:
             return
@@ -79,6 +82,8 @@ class SourceCache:
             tokens=reg.tokens,
             content=reg.content,
             status=RegionStatus.SEEN,
+            last_referenced_turn=reg.last_referenced_turn,
+            reference_count=reg.reference_count,
         )
         # Remove from active intervals
         if reg.file_path in self._visible_intervals:
@@ -86,8 +91,55 @@ class SourceCache:
             if interval in self._visible_intervals[reg.file_path]:
                 self._visible_intervals[reg.file_path].remove(interval)
 
-    def rehydrate(self, src_id: str) -> tuple[str, int]:
-        """Rehydrate a SEEN region back to RESIDENT status."""
+    def mark_salient(self, src_id: str, current_turn: int = 1) -> None:
+        """Mark a region as SALIENT (fresh, high attention in context)."""
+        reg = self._regions_by_id.get(src_id)
+        if not reg:
+            return
+        self._regions_by_id[src_id] = SourceRegion(
+            id=reg.id,
+            file_path=reg.file_path,
+            start_line=reg.start_line,
+            end_line=reg.end_line,
+            content_hash=reg.content_hash,
+            tokens=reg.tokens,
+            content=reg.content,
+            status=RegionStatus.SALIENT,
+            last_referenced_turn=current_turn,
+            reference_count=reg.reference_count + 1,
+        )
+
+    def infer_salience(self, src_id: str, current_turn: int = 1, max_salient_age: int = 3) -> str:
+        """Infer whether a resident region is SALIENT (fresh) or RESIDENT (low-attention)."""
+        reg = self._regions_by_id.get(src_id)
+        if not reg:
+            return RegionStatus.SEEN
+        if reg.status == RegionStatus.SEEN:
+            return RegionStatus.SEEN
+
+        age = max(0, current_turn - reg.last_referenced_turn)
+        if age <= max_salient_age or reg.reference_count >= 3:
+            status = RegionStatus.SALIENT
+        else:
+            status = RegionStatus.RESIDENT
+
+        if reg.status != status:
+            self._regions_by_id[src_id] = SourceRegion(
+                id=reg.id,
+                file_path=reg.file_path,
+                start_line=reg.start_line,
+                end_line=reg.end_line,
+                content_hash=reg.content_hash,
+                tokens=reg.tokens,
+                content=reg.content,
+                status=status,
+                last_referenced_turn=reg.last_referenced_turn,
+                reference_count=reg.reference_count,
+            )
+        return status
+
+    def rehydrate(self, src_id: str, current_turn: int = 1, status: str = RegionStatus.RESIDENT) -> tuple[str, int]:
+        """Rehydrate a SEEN region back to RESIDENT/SALIENT status."""
         reg = self._regions_by_id.get(src_id)
         if not reg:
             return f"error: region {src_id} not found", 0
@@ -99,7 +151,9 @@ class SourceCache:
             content_hash=reg.content_hash,
             tokens=reg.tokens,
             content=reg.content,
-            status=RegionStatus.RESIDENT,
+            status=status,
+            last_referenced_turn=current_turn,
+            reference_count=reg.reference_count + 1,
         )
         if reg.file_path not in self._visible_intervals:
             self._visible_intervals[reg.file_path] = []
@@ -122,7 +176,7 @@ class SourceCache:
 
         if src_id in self._regions_by_id:
             reg = self._regions_by_id[src_id]
-            if reg.status == RegionStatus.RESIDENT:
+            if reg.status in (RegionStatus.RESIDENT, RegionStatus.SALIENT):
                 return f"[{src_id} unchanged: {file_path}:{start_line}-{end_line}]", 0.0
             else:
                 # Was seen previously, now re-requested -> rehydrate into active context

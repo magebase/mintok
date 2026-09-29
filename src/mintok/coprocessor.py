@@ -600,5 +600,87 @@ class SemanticCoprocessor:
         if ev.slice_excerpt:
             first_three = "\n".join(ev.slice_excerpt.splitlines()[:3])
             out_lines.append(f"target slice:\n{first_three}")
-
         return "\n".join(out_lines)
+
+    def failure_analysis_transaction(
+        self,
+        repo_root: Path,
+        failing_test: str,
+        traceback_text: str,
+        current_diff: str = "",
+    ) -> dict[str, Any]:
+        """Compile 6 deterministic static steps into a single zero-turn transaction."""
+        ev = self.investigate_failure(repo_root, traceback_text)
+        sym_packet = (
+            self.localize_symbol(repo_root, ev.target_symbol)
+            if ev.target_symbol != "unknown"
+            else None
+        )
+        writes = (
+            self.state_writers(repo_root, ev.target_symbol)
+            if ev.target_symbol != "unknown"
+            else []
+        )
+        ripple = (
+            self.change_ripple(repo_root, current_diff)
+            if current_diff
+            else []
+        )
+
+        ambiguity_lines = [
+            f"[failure analysis transaction]",
+            f"test: {failing_test}",
+            f"failing node: {ev.target_symbol} ({ev.target_file}:{ev.target_line})",
+        ]
+        if ev.callers:
+            ambiguity_lines.append(f"callers ({len(ev.callers)}): {', '.join(ev.callers[:3])}")
+        if writes:
+            ambiguity_lines.append(f"writers ({len(writes)}): {', '.join(w.writer_function for w in writes[:2])}")
+        if ripple:
+            ambiguity_lines.append(f"affected dependents: {', '.join(ripple[:3])}")
+
+        return {
+            "test": failing_test,
+            "target_symbol": ev.target_symbol,
+            "target_file": ev.target_file,
+            "target_line": ev.target_line,
+            "callers": ev.callers,
+            "writers_count": len(writes),
+            "ripple_count": len(ripple),
+            "summary": "\n".join(ambiguity_lines),
+            "tokens": estimate_tokens("\n".join(ambiguity_lines)),
+        }
+
+
+def compute_retrieval_consensus(retriever_nominations: list[set[str]]) -> float:
+    """Compute consensus C in [0.0, 1.0] across multiple independent retrievers."""
+    valid_sets = [s for s in retriever_nominations if s]
+    k = len(valid_sets)
+    if k <= 1:
+        return 1.0 if k == 1 else 0.0
+
+    total_pairs = 0
+    sum_jaccard = 0.0
+    for i in range(k):
+        for j in range(i + 1, k):
+            s1 = valid_sets[i]
+            s2 = valid_sets[j]
+            intersection = len(s1 & s2)
+            union = len(s1 | s2)
+            jaccard = (intersection / float(union)) if union > 0 else 0.0
+            sum_jaccard += jaccard
+            total_pairs += 1
+
+    return round(sum_jaccard / float(max(1, total_pairs)), 4)
+
+
+def recommended_packet_budget(consensus: float) -> tuple[int, str]:
+    """Map consensus score to adaptive token budget and retrieval policy."""
+    if consensus >= 0.75:
+        return 350, "high_consensus_narrow_packet"
+    if consensus >= 0.40:
+        return 650, "moderate_consensus_extended_packet"
+    if consensus >= 0.20:
+        return 1200, "low_consensus_broad_source"
+    return 0, "disagreement_shell_search_first"
+

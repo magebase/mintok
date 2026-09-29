@@ -198,3 +198,129 @@ class CalibratedLocalController:
 # Structural scaffold alias before offline training on empirical trajectories
 LocalControllerScaffold = CalibratedLocalController
 
+
+@dataclass(frozen=True, slots=True)
+class PolicyBenchRecord:
+    """State-level policy benchmark record capturing state, action, and verified outcome."""
+
+    task_id: str
+    turn_index: int
+    features: StateFeatures
+    action_taken: str
+    cost_tokens: int
+    verified_progress: bool
+    eventual_success: bool
+    candidate_q_scores: dict[str, float] = field(default_factory=dict)
+    oracle_best_action: str = ""
+    oracle_regret: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "turn_index": self.turn_index,
+            "features": asdict(self.features),
+            "action_taken": self.action_taken,
+            "cost_tokens": self.cost_tokens,
+            "verified_progress": self.verified_progress,
+            "eventual_success": self.eventual_success,
+            "candidate_q_scores": dict(self.candidate_q_scores),
+            "oracle_best_action": self.oracle_best_action,
+            "oracle_regret": self.oracle_regret,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PolicyBenchRecord:
+        feat_data = data["features"]
+        feats = StateFeatures(**feat_data)
+        return cls(
+            task_id=data["task_id"],
+            turn_index=data["turn_index"],
+            features=feats,
+            action_taken=data["action_taken"],
+            cost_tokens=data.get("cost_tokens", 0),
+            verified_progress=data.get("verified_progress", False),
+            eventual_success=data.get("eventual_success", False),
+            candidate_q_scores=data.get("candidate_q_scores", {}),
+            oracle_best_action=data.get("oracle_best_action", ""),
+            oracle_regret=data.get("oracle_regret", 0.0),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ShadowEvaluationRecord:
+    """Offline shadow policy comparison record."""
+
+    task_id: str
+    turn_index: int
+    live_action: str
+    shadow_action: str
+    live_q: float
+    shadow_q: float
+    agreed: bool
+    counterfactual_token_delta: float = 0.0
+    counterfactual_success_delta: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class ShadowPolicyEvaluator:
+    """Evaluates a shadow candidate policy against historical PolicyBench records."""
+
+    def __init__(self, shadow_controller: CalibratedLocalController) -> None:
+        self.shadow_controller = shadow_controller
+
+    def evaluate_turn(
+        self,
+        record: PolicyBenchRecord,
+        candidate_actions: list[str] | None = None,
+    ) -> ShadowEvaluationRecord:
+        actions = candidate_actions or ["virtualized-shell", "semantic-compiler", "macro-action", "restart", "abort"]
+        base_dict = asdict(record.features)
+        base_dict.pop("candidate_action", None)
+
+        shadow_action, shadow_q = self.shadow_controller.select_best_action(actions, base_dict)
+        live_action = record.action_taken
+        live_q = record.candidate_q_scores.get(live_action, 0.0)
+
+        agreed = (shadow_action == live_action)
+        # Counterfactual estimations
+        p_live, tokens_live = self.shadow_controller.predict_components(
+            StateFeatures(**{**base_dict, "candidate_action": live_action})
+        )
+        p_shadow, tokens_shadow = self.shadow_controller.predict_components(
+            StateFeatures(**{**base_dict, "candidate_action": shadow_action})
+        )
+
+        return ShadowEvaluationRecord(
+            task_id=record.task_id,
+            turn_index=record.turn_index,
+            live_action=live_action,
+            shadow_action=shadow_action,
+            live_q=live_q,
+            shadow_q=shadow_q,
+            agreed=agreed,
+            counterfactual_token_delta=tokens_shadow - tokens_live,
+            counterfactual_success_delta=p_shadow - p_live,
+        )
+
+    def evaluate_dataset(
+        self,
+        records: list[PolicyBenchRecord],
+    ) -> dict[str, Any]:
+        evals = [self.evaluate_turn(r) for r in records]
+        if not evals:
+            return {"total": 0, "agreement_rate": 1.0, "net_token_delta": 0.0, "net_success_delta": 0.0, "evaluations": []}
+
+        agreed_count = sum(1 for e in evals if e.agreed)
+        net_tokens = sum(e.counterfactual_token_delta for e in evals)
+        net_success = sum(e.counterfactual_success_delta for e in evals)
+
+        return {
+            "total": len(evals),
+            "agreement_rate": round(agreed_count / len(evals), 4),
+            "net_token_delta": round(net_tokens, 2),
+            "net_success_delta": round(net_success, 4),
+            "evaluations": evals,
+        }
+

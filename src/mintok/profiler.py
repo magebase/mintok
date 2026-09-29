@@ -261,6 +261,11 @@ class TrajectoryEfficiencyMetrics:
     navigation_tax_tokens: int = 0
     recovery_tax_tokens: int = 0
     policy_regret_usd: float = 0.0
+    context_residency_tax_tokens: int = 0
+    schema_tax_tokens: int = 0
+    verification_redundancy_tax_tokens: int = 0
+    frontier_navigation_tax_tokens: int = 0
+    localizable_frontier_turns: int = 0
 
 
 class LostSolveCategory:
@@ -274,16 +279,18 @@ class LostSolveCategory:
     PREMATURE_EARLY_STOP = "premature_early_stop"
     CONTROLLER_MISROUTING = "controller_misrouting"
     MODEL_VARIANCE = "model_variance"
+    UNDETERMINED = "undetermined"
 
 
 @dataclass(frozen=True, slots=True)
 class LostSolveAttribution:
-    """Attribution record explaining a lost solve."""
+    """Evidence-backed attribution record explaining a lost solve."""
 
     task_id: str
     category: str
     explanation: str
     tokens_saved: int = 0
+    evidence: dict[str, Any] = field(default_factory=dict)
 
 
 def attribute_lost_solve(
@@ -296,10 +303,13 @@ def attribute_lost_solve(
     source_suppressed: bool = False,
     virtualization_omitted: bool = False,
     tokens_saved: int = 0,
+    evidence: dict[str, Any] | None = None,
 ) -> LostSolveAttribution | None:
-    """Classify the root cause of a Control-only solve."""
+    """Classify the root cause of a Control-only solve with evidence requirements."""
     if not control_solved or mintok_solved:
         return None
+
+    ev = evidence or {}
 
     if early_stopped:
         return LostSolveAttribution(
@@ -307,6 +317,7 @@ def attribute_lost_solve(
             category=LostSolveCategory.PREMATURE_EARLY_STOP,
             explanation="Early stop continuation hazard aborted before task resolution",
             tokens_saved=tokens_saved,
+            evidence=ev,
         )
     if verification_missed:
         return LostSolveAttribution(
@@ -314,6 +325,7 @@ def attribute_lost_solve(
             category=LostSolveCategory.VERIFICATION_UNDER_TESTING,
             explanation="Targeted test passed while broader test suite had unresolved regressions",
             tokens_saved=tokens_saved,
+            evidence=ev,
         )
     if packet_omitted:
         return LostSolveAttribution(
@@ -321,6 +333,7 @@ def attribute_lost_solve(
             category=LostSolveCategory.SEMANTIC_PACKET_PRUNING,
             explanation="AST neighborhood pruning omitted critical caller containing bug",
             tokens_saved=tokens_saved,
+            evidence=ev,
         )
     if source_suppressed:
         return LostSolveAttribution(
@@ -328,19 +341,34 @@ def attribute_lost_solve(
             category=LostSolveCategory.SOURCE_DEDUP_SUPPRESSION,
             explanation="Source deduplication suppressed code span required for semantic fix",
             tokens_saved=tokens_saved,
+            evidence=ev,
         )
     if virtualization_omitted:
-        return LostSolveAttribution(
-            task_id=task_id,
-            category=LostSolveCategory.VIRTUALIZATION_OMISSION,
-            explanation="Tool output digest omitted key error message line",
-            tokens_saved=tokens_saved,
-        )
+        # Require concrete evidence: decisive info seen in control, present in raw, absent in digest, unrecovered
+        has_proof = bool(ev.get("decisive_omitted", False))
+        if has_proof:
+            return LostSolveAttribution(
+                task_id=task_id,
+                category=LostSolveCategory.VIRTUALIZATION_OMISSION,
+                explanation="Tool output digest omitted key error message line",
+                tokens_saved=tokens_saved,
+                evidence=ev,
+            )
+        else:
+            return LostSolveAttribution(
+                task_id=task_id,
+                category=LostSolveCategory.UNDETERMINED,
+                explanation="Virtualization occurred but missing evidence of causal omission",
+                tokens_saved=tokens_saved,
+                evidence=ev,
+            )
 
     return LostSolveAttribution(
         task_id=task_id,
         category=LostSolveCategory.MODEL_VARIANCE,
         explanation="Stochastic model completion variance on identical evidence",
         tokens_saved=tokens_saved,
+        evidence=ev,
     )
+
 

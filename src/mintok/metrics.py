@@ -1,22 +1,41 @@
-"""Efficiency accounting: accepted changes per total dollar, with paired statistics."""
-
 from __future__ import annotations
 
+import hashlib
+import math
 import random
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
-import math
 
 
 @dataclass(frozen=True, slots=True)
-class ProviderPricing:
-    """Pricing rates per million tokens across provider billing dimensions."""
+class PricingTable:
+    """Externalized, versioned provider pricing rate card.
 
-    price_fresh_input_per_m: float = 3.00
-    price_cached_input_per_m: float = 0.30
-    price_output_per_m: float = 15.00
-    price_reasoning_per_m: float = 15.00
+    Raw provider token usage never changes; pricing data is tracked externally
+    with content hash to allow historical cost re-evaluation as model prices evolve.
+    """
+
+    provider: str = "openrouter"
+    model: str = "anthropic/claude-3.5-sonnet"
+    effective_from: str = "2026-09-01"
+    fresh_input_price: float = 3.00
+    cache_read_price: float = 0.30
+    cache_write_price: float = 3.75
+    output_price: float = 15.00
+    reasoning_price: float = 15.00
+
+    def pricing_table_hash(self) -> str:
+        payload = (
+            f"{self.provider}:{self.model}:{self.effective_from}:"
+            f"{self.fresh_input_price}:{self.cache_read_price}:"
+            f"{self.cache_write_price}:{self.output_price}:{self.reasoning_price}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+# Backwards compatibility alias
+ProviderPricing = PricingTable
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,18 +46,41 @@ class TokenUsageBreakdown:
     t_cached: int = 0
     t_output: int = 0
     t_reasoning: int = 0
+    pricing_table_hash: str = ""
 
     @property
     def total_tokens(self) -> int:
         return self.t_fresh + self.t_cached + self.t_output + self.t_reasoning
 
-    def compute_billed_usd(self, pricing: ProviderPricing | None = None) -> float:
-        p = pricing or ProviderPricing()
-        fresh_usd = (self.t_fresh / 1_000_000.0) * p.price_fresh_input_per_m
-        cached_usd = (self.t_cached / 1_000_000.0) * p.price_cached_input_per_m
-        output_usd = (self.t_output / 1_000_000.0) * p.price_output_per_m
-        reasoning_usd = (self.t_reasoning / 1_000_000.0) * p.price_reasoning_per_m
+    def compute_billed_usd(self, pricing: PricingTable | None = None) -> float:
+        p = pricing or PricingTable()
+        fresh_usd = (self.t_fresh / 1_000_000.0) * p.fresh_input_price
+        cached_usd = (self.t_cached / 1_000_000.0) * p.cache_read_price
+        output_usd = (self.t_output / 1_000_000.0) * p.output_price
+        reasoning_usd = (self.t_reasoning / 1_000_000.0) * p.reasoning_price
         return fresh_usd + cached_usd + output_usd + reasoning_usd
+
+
+def frontier_call_elimination_ratio(frontier_calls_mintok: int, frontier_calls_control: int) -> float:
+    """FER = 1 - (frontier_calls_mintok / frontier_calls_control)."""
+    if frontier_calls_control <= 0:
+        return 0.0
+    return max(0.0, 1.0 - (float(frontier_calls_mintok) / float(frontier_calls_control)))
+
+
+def decisive_evidence_density(decisive_tokens: int, search_tokens_before: int) -> float:
+    """DED = decisive_evidence_tokens / tokens_before_decisive_evidence."""
+    return float(decisive_tokens) / float(max(1, search_tokens_before))
+
+
+def post_decisive_efficiency(tokens_after_decisive: int, total_tokens: int) -> float:
+    """PDE = tokens_after_decisive / total_tokens."""
+    return float(tokens_after_decisive) / float(max(1, total_tokens))
+
+
+def information_reuse_multiplier(uses_count: int, creation_tokens: int) -> float:
+    """IRM = uses_of_stored_knowledge / tokens_spent_creating_knowledge."""
+    return float(uses_count) / float(max(1, creation_tokens))
 
 
 @dataclass(frozen=True, slots=True)

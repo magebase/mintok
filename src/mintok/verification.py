@@ -24,6 +24,7 @@ full suite: not yet required
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -231,18 +232,24 @@ class VerificationCompiler:
 
 @dataclass
 class VerificationSafetyTracker:
-    """Tracks MissRate = P(selected tests pass | broader verification fails).
+    """Tracks MissRate = P(selected tests pass | broader verification fails) with statistical UCB.
 
     Guarantees internal fast-path test selection does not create false confidence.
-    On benchmark evaluations, the final checker runs regardless.
+    Uses Wilson score 95% Upper Confidence Bound to prevent premature safety claims on small samples.
     """
 
     total_evaluations: int = 0
     selected_passes: int = 0
     broader_failures: int = 0
     false_passes: int = 0  # selected passed, but broader failed
+    severity_weighted_misses: float = 0.0
 
-    def record_event(self, selected_passed: bool, broader_passed: bool) -> None:
+    def record_event(
+        self,
+        selected_passed: bool,
+        broader_passed: bool,
+        severity_weight: float = 1.0,
+    ) -> None:
         self.total_evaluations += 1
         if selected_passed:
             self.selected_passes += 1
@@ -250,37 +257,102 @@ class VerificationSafetyTracker:
             self.broader_failures += 1
             if selected_passed:
                 self.false_passes += 1
+                self.severity_weighted_misses += severity_weight
 
     @property
     def miss_rate(self) -> float:
-        """P(selected tests pass | broader verification fails)."""
+        """Observed MissRate = false_passes / broader_failures."""
         if self.broader_failures == 0:
             return 0.0
         return self.false_passes / float(self.broader_failures)
 
+    @property
+    def wilson_ucb_95(self) -> float:
+        """Wilson score 95% upper confidence bound on true miss rate."""
+        n = self.broader_failures
+        if n == 0:
+            return 1.0  # complete uncertainty when no broader failures observed
+        k = self.false_passes
+        p_hat = k / float(n)
+        z = 1.96  # 95% confidence
+        denom = 1.0 + (z * z) / float(n)
+        center = (p_hat + (z * z) / (2.0 * float(n))) / denom
+        margin = (z / denom) * ((p_hat * (1.0 - p_hat) / float(n) + (z * z) / (4.0 * float(n * n))) ** 0.5)
+        return min(1.0, round(center + margin, 4))
+
     def is_safe(self, max_allowed_miss_rate: float = 0.05) -> bool:
+        """Point-estimate safety check."""
         return self.miss_rate <= max_allowed_miss_rate
+
+    def is_statistically_safe(self, max_allowed_ucb: float = 0.10) -> bool:
+        """Statistical confidence gate: UCB_95(MissRate) <= epsilon."""
+        return self.wilson_ucb_95 <= max_allowed_ucb
+
+
+@dataclass(frozen=True, slots=True)
+class DependencyExactCacheKey:
+    """Exact multi-dimensional cache key for reproducible test pass verification."""
+
+    test_id: str
+    test_code_hash: str
+    transitive_dependency_hash: str
+    config_hash: str = ""
+    environment_fingerprint: str = ""
+    dependency_versions_hash: str = ""
+
+    def composite_hash(self) -> str:
+        payload = (
+            f"{self.test_id}:{self.test_code_hash}:{self.transitive_dependency_hash}:"
+            f"{self.config_hash}:{self.environment_fingerprint}:{self.dependency_versions_hash}"
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+class VerificationStage:
+    """Verification DAG stages from cheapest sanity checks to full suites."""
+
+    SYNTAX = "syntax"
+    AFFECTED_UNIT = "affected_unit"
+    AFFECTED_PACKAGE = "affected_package"
+    INTEGRATION = "integration"
+    FULL_SUITE = "full_suite"
 
 
 class PassVerificationCache:
-    """Caches passing test executions against code dependency hashes.
+    """Caches passing test executions against code dependency hashes or exact cache keys.
 
     Avoids rerunning unchanged test suites when neither the test nor its
-    dependency closure has been altered.
+    exact dependency/config closure has been altered.
     """
 
     def __init__(self) -> None:
-        # test_id -> dependency_hash
+        # test_id -> composite_hash or dependency_hash
         self._cached_passes: dict[str, str] = {}
 
-    def record_pass(self, test_id: str, dependency_hash: str) -> None:
-        self._cached_passes[test_id] = dependency_hash
+    def record_pass(self, test_id: str, dependency_hash_or_key: str | DependencyExactCacheKey) -> None:
+        val = (
+            dependency_hash_or_key.composite_hash()
+            if isinstance(dependency_hash_or_key, DependencyExactCacheKey)
+            else str(dependency_hash_or_key)
+        )
+        self._cached_passes[test_id] = val
 
-    def is_cached_pass(self, test_id: str, current_dependency_hash: str) -> bool:
+    def is_cached_pass(self, test_id: str, current_hash_or_key: str | DependencyExactCacheKey) -> bool:
         cached_hash = self._cached_passes.get(test_id)
         if not cached_hash:
             return False
-        return cached_hash == current_dependency_hash
+        curr_val = (
+            current_hash_or_key.composite_hash()
+            if isinstance(current_hash_or_key, DependencyExactCacheKey)
+            else str(current_hash_or_key)
+        )
+        return cached_hash == curr_val
+
+    def record_pass_exact(self, key: DependencyExactCacheKey) -> None:
+        self.record_pass(key.test_id, key)
+
+    def is_pass_exact(self, key: DependencyExactCacheKey) -> bool:
+        return self.is_cached_pass(key.test_id, key)
 
     def invalidate(self, test_id: str | None = None) -> None:
         if test_id:
