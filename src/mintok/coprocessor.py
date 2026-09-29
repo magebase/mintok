@@ -104,12 +104,91 @@ class MacroActionRecord:
         }
 
 
+@dataclass
+class PacketUtilityRecord:
+    """Telemetry tracking the marginal utility of an emitted semantic packet."""
+
+    packet_id: str
+    packet_type: str
+    tokens: int
+    symbols_contained: list[str]
+    was_referenced: bool = False
+    patch_touched: bool = False
+    hypothesis_resolved: bool = False
+
+    @property
+    def utility_score(self) -> float:
+        """Calculate PacketUtility = useful state transitions / packet tokens."""
+        value = 0.0
+        if self.was_referenced:
+            value += 1.0
+        if self.patch_touched:
+            value += 2.0
+        if self.hypothesis_resolved:
+            value += 3.0
+        denom = max(10, self.tokens)
+        return (value * 100.0) / denom
+
+
+class PacketUtilityTracker:
+    """Tracks and filters semantic context emissions by empirical marginal utility."""
+
+    def __init__(self) -> None:
+        self._records: dict[str, PacketUtilityRecord] = {}
+
+    def record_packet(
+        self,
+        packet_id: str,
+        packet_type: str,
+        tokens: int,
+        symbols: list[str],
+    ) -> PacketUtilityRecord:
+        rec = PacketUtilityRecord(
+            packet_id=packet_id,
+            packet_type=packet_type,
+            tokens=tokens,
+            symbols_contained=list(symbols),
+        )
+        self._records[packet_id] = rec
+        return rec
+
+    def record_transition(
+        self,
+        packet_id: str,
+        referenced_symbols: list[str],
+        patch_symbols: list[str],
+        resolved_hypothesis: bool = False,
+    ) -> None:
+        rec = self._records.get(packet_id)
+        if not rec:
+            return
+        contained = set(rec.symbols_contained)
+        if any(s in contained for s in referenced_symbols):
+            rec.was_referenced = True
+        if any(s in contained for s in patch_symbols):
+            rec.patch_touched = True
+        if resolved_hypothesis:
+            rec.hypothesis_resolved = True
+
+    def should_prune(self, packet_type: str, candidate_tokens: int) -> bool:
+        """Determine whether to prune low-utility packet types (e.g. broad AST neighbors)."""
+        # Callers and state_writers have verified high utility; broad AST neighborhoods are pruned if large
+        if packet_type in ("callers", "state_writers"):
+            return False
+        if packet_type == "change_ripple" and candidate_tokens > 200:
+            return True
+        if candidate_tokens > 350:
+            return True
+        return False
+
+
 class SemanticCoprocessor:
     """Local coprocessor orchestrating deterministic inspections without frontier turns."""
 
     def __init__(self, repo_root: Path | None = None) -> None:
         self.repo_root = repo_root
         self.action_records: list[MacroActionRecord] = []
+        self.utility_tracker = PacketUtilityTracker()
 
     def investigate_failure(self, repo_root: Path, traceback_text: str) -> EvidencePacket:
         """Parse failure traceback, locate failing AST node, and bundle context."""

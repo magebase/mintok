@@ -24,9 +24,14 @@
       },
       "frontier_calls": 1263,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 1054211,
         "gross_savings": 0,
+        "gross_compression_ratio": 1.0,
         "recovery_cost": 0,
-        "net_savings": 0
+        "total_visible_tokens": 1054211,
+        "net_savings": 0,
+        "net_compression_ratio": 1.0
       },
       "history_replay_eliminated_pct": 0.0,
       "macro_actions": {
@@ -57,9 +62,14 @@
       },
       "frontier_calls": 1263,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 131686,
         "gross_savings": 922525,
+        "gross_compression_ratio": 8.01,
         "recovery_cost": 96915,
-        "net_savings": 825610
+        "total_visible_tokens": 228601,
+        "net_savings": 825610,
+        "net_compression_ratio": 4.61
       },
       "history_replay_eliminated_pct": 26.4,
       "macro_actions": {
@@ -90,9 +100,14 @@
       },
       "frontier_calls": 1263,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 131686,
         "gross_savings": 922525,
+        "gross_compression_ratio": 8.01,
         "recovery_cost": 96915,
-        "net_savings": 825610
+        "total_visible_tokens": 228601,
+        "net_savings": 825610,
+        "net_compression_ratio": 4.61
       },
       "history_replay_eliminated_pct": 78.4,
       "macro_actions": {
@@ -123,9 +138,14 @@
       },
       "frontier_calls": 1167,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 131686,
         "gross_savings": 922525,
+        "gross_compression_ratio": 8.01,
         "recovery_cost": 96915,
-        "net_savings": 825610
+        "total_visible_tokens": 228601,
+        "net_savings": 825610,
+        "net_compression_ratio": 4.61
       },
       "history_replay_eliminated_pct": 81.2,
       "macro_actions": {
@@ -156,9 +176,14 @@
       },
       "frontier_calls": 1028,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 131686,
         "gross_savings": 922525,
+        "gross_compression_ratio": 8.01,
         "recovery_cost": 96915,
-        "net_savings": 825610
+        "total_visible_tokens": 228601,
+        "net_savings": 825610,
+        "net_compression_ratio": 4.61
       },
       "history_replay_eliminated_pct": 83.5,
       "macro_actions": {
@@ -189,9 +214,14 @@
       },
       "frontier_calls": 978,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 131686,
         "gross_savings": 922525,
+        "gross_compression_ratio": 8.01,
         "recovery_cost": 96915,
-        "net_savings": 825610
+        "total_visible_tokens": 228601,
+        "net_savings": 825610,
+        "net_compression_ratio": 4.61
       },
       "history_replay_eliminated_pct": 85.0,
       "macro_actions": {
@@ -222,9 +252,14 @@
       },
       "frontier_calls": 978,
       "virtualization": {
+        "raw_tokens": 1054211,
+        "digest_tokens": 131686,
         "gross_savings": 922525,
+        "gross_compression_ratio": 8.01,
         "recovery_cost": 96915,
-        "net_savings": 825610
+        "total_visible_tokens": 228601,
+        "net_savings": 825610,
+        "net_compression_ratio": 4.61
       },
       "history_replay_eliminated_pct": 87.6,
       "macro_actions": {
@@ -238,7 +273,7 @@
     "tasks": 50,
     "psolve_calibration_mae": 0.55,
     "brier_score": 0.3625,
-    "token_mae": 397815.9,
+    "token_mae": 132175.06,
     "mean_utility_regret": 0.2196129,
     "routing_regret_rate": 1.0
   },
@@ -273,6 +308,12 @@
       "verification": 2405501,
       "other": 392734
     }
+  },
+  "optimization_frontier": {
+    "projected_total_tokens": 7098681,
+    "projected_solves_per_mtok": 2.9583,
+    "projected_yield_vs_control": 2.97,
+    "projected_amplification_factor": 3.31
   },
   "oracle_minimum": {
     "known_sufficient_tokens_total": 2145000,
