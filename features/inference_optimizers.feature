@@ -59,3 +59,51 @@ Feature: MinTok 3.1 advanced inference optimization mechanisms
     When a training sample with utility regret 0.45 is added
     Then the sample weight is 0.45
     And the calibrated controller evaluates candidate actions and selects the highest utility action
+
+  Scenario: Verification safety tracker calculates miss rate
+    Given a verification safety tracker
+    When 20 verification events occur with 1 false pass and 5 broader failures
+    Then the computed miss rate is 0.20
+    And the safety gate fails when max allowed miss rate is 0.05
+
+  Scenario: Passing test verification cache avoids redundant execution
+    Given a passing verification cache
+    When test "tests/test_foo.py::test_bar" passes for dependency hash "abc1234"
+    Then the test is confirmed as a cached pass for hash "abc1234"
+    And the test is not a cached pass for hash "def5678"
+
+  Scenario: Context rent manager evicts leases on disproven hypothesis event
+    Given a context rent manager with an admitted object associated with hypothesis "H1"
+    When an event "hypothesis_rejected" for "H1" is triggered
+    Then the object associated with "H1" is evicted from active memory
+
+  Scenario: Cache-aware compaction calculates positive net benefit when replay savings exceed invalidation
+    When evaluating cache compaction for prefix 50 tokens and delta 100 tokens across 15 remaining turns
+    Then the net compaction benefit is positive
+
+  Scenario: Source cache distinguishes RESIDENT and SEEN regions and supports rehydration
+    Given a source cache with a resident span for "utils.py" lines 10 to 40
+    When the span is evicted from active context
+    Then its status becomes "SEEN"
+    When the span is rehydrated
+    Then its status becomes "RESIDENT"
+
+  Scenario: Dynamic tool surface filters schema by phase
+    When filtering tool surface for phase "verify"
+    Then only "verify" and "query" tools are exposed
+    And the tool surface tokens for "verify" are less than 80 tokens
+
+  Scenario: Adaptive packet pruning suppresses pruning under retriever disagreement
+    Given a packet utility tracker
+    When a packet of type "ast_neighborhood" with 500 tokens has retriever disagreement
+    Then the packet utility tracker recommends retaining the packet
+
+  Scenario: Token usage breakdown computes exact billed provider dollars
+    Given a token usage breakdown with 100000 fresh, 400000 cached, 20000 output, and 10000 reasoning tokens
+    When computing billed cost under default pricing
+    Then the total billed cost is greater than 0.85 and less than 0.95 dollars
+
+  Scenario: Lost solve attribution classifies failure causes
+    When attributing a lost solve where the task was early stopped
+    Then the attribution category is "premature_early_stop"
+

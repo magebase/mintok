@@ -46,12 +46,52 @@ TOOL_SURFACE: list[dict] = [
     },
 ]
 
+# Two-level ABI: Level 1 compact capability index (~30 tokens)
+CAPABILITY_INDEX: dict[str, str] = {
+    "code": "edit/patch/codemod symbols (change, add, codemod)",
+    "exec": "run shell/expand observations (verify, expand)",
+    "memory": "read facts and state (query)",
+    "verify": "run sanity checks and discriminating tests (verify)",
+}
+
+# Phase-based tool schema filtering map
+PHASE_TOOL_MAP: dict[str, tuple[str, ...]] = {
+    "localize": ("query", "codemod"),
+    "patch": ("change", "add", "codemod", "query"),
+    "verify": ("verify", "query"),
+    "all": ("query", "change", "add", "codemod", "verify"),
+}
+
+
+def get_filtered_tool_surface(phase: str = "all") -> list[dict]:
+    """Expose only the tools necessary for the current task phase to reduce per-turn token tax."""
+    allowed = set(PHASE_TOOL_MAP.get(phase, PHASE_TOOL_MAP["all"]))
+    return [t for t in TOOL_SURFACE if t["name"] in allowed]
+
+
+def filtered_tool_surface_json(phase: str = "all") -> str:
+    return json.dumps(get_filtered_tool_surface(phase), separators=(",", ":"))
+
+
+def estimate_tool_surface_tokens(phase: str = "all") -> int:
+    return estimate_tokens(filtered_tool_surface_json(phase))
+
+
+def capability_index_summary() -> str:
+    """Return compact permanent capability index."""
+    lines = ["Capabilities:"]
+    for cap, desc in CAPABILITY_INDEX.items():
+        lines.append(f"- {cap}: {desc}")
+    return "\n".join(lines)
+
+
 # ``EFFECT_PREDICATES`` is imported from mintok.ir above and re-exported here
 # so existing consumers of ``mintok.abi.EFFECT_PREDICATES`` keep working.
 
 
 def tool_surface_json() -> str:
     return json.dumps(TOOL_SURFACE, separators=(",", ":"))
+
 
 
 class ChangeRejected(ValueError):

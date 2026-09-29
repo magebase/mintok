@@ -170,15 +170,38 @@ class PacketUtilityTracker:
         if resolved_hypothesis:
             rec.hypothesis_resolved = True
 
-    def should_prune(self, packet_type: str, candidate_tokens: int) -> bool:
-        """Determine whether to prune low-utility packet types (e.g. broad AST neighbors)."""
-        # Callers and state_writers have verified high utility; broad AST neighborhoods are pruned if large
+    def should_prune(
+        self,
+        packet_type: str,
+        candidate_tokens: int,
+        uncertain: bool = False,
+        retriever_disagreement: bool = False,
+        omission_risk: float = 0.0,
+    ) -> bool:
+        """Determine whether to prune low-utility packet types (e.g. broad AST neighbors).
+
+        Safeguards against critical omission:
+        - 350-token default cap
+        - 600-token cap if uncertain or omission_risk > 0.30
+        - No pruning if retrievers disagree (preserves raw relevant spans)
+        """
+        # Callers and state_writers have verified high utility; never prune
         if packet_type in ("callers", "state_writers"):
             return False
+
+        # If multiple retrievers disagree on candidate locations, preserve exploration
+        if retriever_disagreement:
+            return False
+
+        # If uncertain or elevated omission risk, expand allowance to 600 tokens
+        threshold = 600 if (uncertain or omission_risk > 0.30) else 350
+
         if packet_type == "change_ripple" and candidate_tokens > 200:
             return True
-        if candidate_tokens > 350:
+
+        if candidate_tokens > threshold:
             return True
+
         return False
 
 

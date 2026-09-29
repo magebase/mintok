@@ -1,6 +1,6 @@
-"""Calibrated Local Controller & Feature Extraction Dataset for MinTok 3.1.
+"""Local Controller Scaffold & Feature Extraction Dataset for MinTok 3.1.
 
-Formulates local inference routing as a regret-weighted tabular prediction problem:
+Structural formulation of local inference action selection:
 1. Feature Extraction:
    - Repo: LOC, package count, complexity score, test runner.
    - Task: instruction length, named symbols count, cue category.
@@ -15,8 +15,9 @@ Formulates local inference routing as a regret-weighted tabular prediction probl
    - w_i = |U_best,i - U_alt,i|, focusing learning on financially consequential instances.
 4. Repository-Level Grouped Validation:
    - Groups by repository (GroupKFold / Leave-One-Repository-Out) preventing intra-repo data leakage.
-5. Calibrated Action Value Q(s, a):
+5. Structural Action Value Formulation Q(s, a):
    - Q(s, a) = V * P(success | s, a) - lambda * E[tokens | s, a].
+   (Note: Serves as a controller scaffold until trained on actual live trajectory outcomes).
 """
 
 from __future__ import annotations
@@ -192,3 +193,8 @@ class CalibratedLocalController:
                 best_act = act
 
         return best_act, best_q
+
+
+# Structural scaffold alias before offline training on empirical trajectories
+LocalControllerScaffold = CalibratedLocalController
+

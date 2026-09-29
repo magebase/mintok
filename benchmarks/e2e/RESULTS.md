@@ -1418,7 +1418,24 @@ Following the 50-task empirical audit which demonstrated that sequential capabil
 
 ---
 
-### MinTok 3.1 Seven-Arm Component Ablation Ladder (50-Task SWE-rebench Live Window)
+### MinTok Evidence Hierarchy (Live Empirical vs. Counterfactual vs. Projected)
+
+To maintain absolute scientific transparency and prevent misinterpreting offline simulations as live benchmark results, MinTok enforces a strict three-tier evidence hierarchy:
+
+- **TIER 1 — LIVE EMPIRICAL EVALUATION**:
+  - **Control Baseline (50 tasks)**: 20/50 solved (40.0%), 20,050,795 tokens, 0.998 solves/MTok. Executed live against OpenRouter frontier model endpoints using the official SWE-rebench multi-turn environment harness.
+  - **Old Adaptive MinTok (50 tasks)**: 15/50 solved (30.0%), 17,030,000 tokens, 0.881 solves/MTok. Executed live under the earlier restricted escalation regime.
+
+- **TIER 2 — COUNTERFACTUAL / REPLAY SENSITIVITY ANALYSIS**:
+  - **7-Arm Component Sensitivity Ladder (`v3_v` through `v3_vcrmp`)**: Re-simulates the progressive addition of virtualization, state compilation, repo profiles, macro-actions, and proactive diagnostics over the empirical trajectories, measuring isolated marginal contributions while holding model behavior and ground-truth execution paths constant.
+
+- **TIER 3 — COUNTERFACTUAL OPTIMIZATION BUDGET & PROJECTIONS**:
+  - **Full v3.1 Integration (Synthesized)**: 21/50 solved, 9,818,372 tokens, 2.14x Control yield.
+  - **Next Optimization Frontier**: ~7.10M tokens, ~2.97x Control yield, 3.31x inference amplification factor.
+
+---
+
+### MinTok 3.1 Seven-Arm Component Ablation Ladder (50-Task SWE-rebench Window)
 
 Using the official 50-task SWE-rebench live dataset ([`swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_window_eval_50_stealth_space_bunny_alpha_adaptive.json)) and trajectory execution logs ([`benchmarks/public/ablation_suite.py`](file:///home/aqua/Projects/MinTok/benchmarks/public/ablation_suite.py)), we evaluated all 7 cumulative component arms:
 
@@ -1449,7 +1466,7 @@ Using the official 50-task SWE-rebench live dataset ([`swe_rebench_window_eval_5
 #### Router Calibration & Regret Accounting
 - **$P(\text{solve})$ Calibration MAE**: 0.5500
 - **Brier Score**: 0.3625
-- **Token Prediction MAE**: 132,175.1 tokens (calibrated multi-turn trajectory expectation vs actual multi-turn allocation; down from earlier unscaled unit-test MAE of 397k)
+- **Token Prediction MAE**: 132,175.1 tokens (calibration adjustment $\neq$ learned generalization; reflects calibrated multi-turn trajectory scaling rather than single-turn unit test assumptions).
 - **Mean Utility Regret**: 0.2196
 - **Routing Regret Rate**: 100.0% (demonstrates that static rule-based heuristics leave substantial headroom, validating the necessity of learning empirical transition models $\hat{P}(\text{solve} \mid p, s)$ and $\hat{E}[T \mid p, s]$).
 
@@ -1477,44 +1494,63 @@ Using the official 50-task SWE-rebench live dataset ([`swe_rebench_window_eval_5
 - **MinTok 3.1 Actual Tokens**: 9,818,372 → **Inference Amplification Factor ($A$)**: **4.58x**.
 - **Amplification Reduction**: **2.04x** reduction in unguided search waste.
 
-#### Next-Stage Optimization Frontier (< 3.5x Inference Amplification Target)
+#### Counterfactual Optimization Budget (< 3.5x Inference Amplification Target)
 
-With historical replay crushed from 31.0% to 4.5%, the profiler reveals four primary token sinks accounting for **59.5%** of remaining frontier spend: verification (24.5%), source code (14.0%), semantic packets (12.0%), and conversation state (9.0%). MinTok addresses these via six specialized optimization modules:
+With historical replay crushed from 31.0% to 4.5%, the profiler reveals four primary token sinks accounting for **59.5%** of modeled remaining frontier spend: verification (24.5%), source code (14.0%), semantic packets (12.0%), and conversation state (9.0%). MinTok addresses these via six specialized optimization modules:
 
 1. **Verification Compiler (`src/mintok/verification.py`)**:
    - **AST Static Sanity Gate**: Catches invalid patch syntax before spawning subprocess test harnesses.
    - **Minimal Discriminating Test Selector**: Chooses $t^* = \arg\max \frac{P(\text{detects failure})}{\text{cost}}$ instead of running whole suites.
    - **Failure-Delta Tracker**: Computes `{resolved, regressions, pre_existing}`, emitting compact ~50-token verification digests.
-   - *Impact*: Halves verification spend from 2.41M to 1.20M tokens (-1,202,750 tokens).
+   - **Safety & Invalidation Guard**: Tracks $\text{MissRate} = P(\text{selected pass} \mid \text{broader fail})$ and caches passing tests against dependency hashes.
+   - *Impact*: Projected to cut verification spend by 50% under replay/accounting assumptions (-1,202,750 tokens, down to 12.2%).
 
-2. **CanonicalState Delta-Encoding & Residency Hierarchy (`src/mintok/conversation.py`)**:
+2. **CanonicalState Delta-Encoding & Context Rent Hierarchy (`src/mintok/conversation.py`)**:
    - Classifies facts into `HOT`, `WARM`, and `COLD` tiers based on access recency and utility score.
+   - Implements Context Rent $\text{Rent}(c) = \text{tokens}(c) \times \text{expected\_future\_replays}$ and event-driven eviction.
+   - Cache-aware compactor evaluates $\text{savings}_{\text{future replay}} - \text{cost}_{\text{cache invalidation}}$ before rewriting stable state prefixes.
    - Emits compact `StateDelta` diffs (~40-60 tokens) rather than full state reserialization on each turn.
-   - *Impact*: Reduces conversation state spend from 884k to 353k tokens (-530,192 tokens).
+   - *Impact*: Projected to reduce conversation state spend by 60% under replay/accounting assumptions (-530,192 tokens, down to 3.6%).
 
 3. **Semantic Packet Utility & AST Pruner (`src/mintok/coprocessor.py`)**:
    - Tracks $\text{PacketUtility} = \frac{\text{useful state transitions}}{\text{packet tokens}}$.
-   - Prunes AST neighborhoods exceeding 350 tokens when utility is low.
-   - *Impact*: Reduces semantic packet tokens from 1.18M to 687k tokens (-494,845 tokens).
+   - Adaptive threshold: 350 tokens default, expanding to 600 if uncertain, and suppressing pruning if retrievers disagree to prevent critical omissions.
+   - *Impact*: Projected to reduce semantic packet tokens by 42% under replay/accounting assumptions (-494,845 tokens, down to 7.0%).
 
-4. **Source Span Deduplication & Novelty Tracking (`src/mintok/source_cache.py`)**:
+4. **Source Span Deduplication & SEEN/RESIDENT Lifecycle (`src/mintok/source_cache.py`)**:
    - Tracks visible line intervals per file hash; computes $\text{Novelty}(\text{chunk}) \in [0.0, 1.0]$.
+   - Distinguishes `RESIDENT` (in context) from `SEEN` (evicted to external cache) with on-demand rehydration.
    - Suppresses redundant reads, emitting `src:xxxx unchanged` tokens.
-   - *Impact*: Reduces source spend from 1.37M to 880k tokens (-494,846 tokens).
+   - *Impact*: Projected to reduce source spend by 36% under replay/accounting assumptions (-494,846 tokens, down to 9.0%).
 
-5. **Calibrated Local Controller & Tabular Regret Dataset (`src/mintok/controller.py`)**:
-   - Formulates local action selection maximizing $Q(s, a) = V \cdot P(\text{success} \mid s, a) - \lambda \cdot E[\text{tokens} \mid s, a]$.
+5. **Local Controller Scaffold & Tabular Regret Dataset (`src/mintok/controller.py`)**:
+   - Structural formulation of local action selection maximizing $Q(s, a) = V \cdot P(\text{success} \mid s, a) - \lambda \cdot E[\text{tokens} \mid s, a]$.
    - Regret weighting $w_i = |U_{\text{best}} - U_{\text{alt}}|$ with grouped repository cross-validation to eliminate distribution shift.
 
 6. **Continuation Predictor & Clean-Context Restart (`src/mintok/early_stop.py`)**:
    - Predicts $P(\text{solve next 50k/100k})$ to abort runaway multi-turn sessions before exceeding budgets.
    - Emits `RESTART_FROM_CHECKPOINT` to wipe noisy intermediate chatter while preserving verified invariants.
 
-**Projected Frontier Optimization Yield**:
+**Counterfactual Optimization Budget Projections**:
 - Projected Total Tokens: **7,098,681 tokens** (down from 9,818,372, -27.7% reduction).
 - Projected Solves/MTok: **2.96** (vs Control's 0.998).
-- Projected Yield: **2.97x Control**.
+- Projected Yield: **2.97x Control** (subject to live empirical validation).
 - Projected Inference Amplification Factor: **3.31x** (achieving the $< 3.5\times$ target vs the minimal known-sufficient evidence).
+
+### Pre-Registered Live Evaluation Protocol & Decision Gates
+
+For the next live 50-task SWE-rebench evaluation comparing Control vs. Full MinTok:
+
+- **Pre-Registered Primary Metric**: Solves per million provider tokens ($S/\text{MTok}$).
+- **Secondary Metrics**: Solve rate, total provider tokens, tokens per attempt, p50/p95/max tokens, frontier turns.
+- **Mechanistic Tracking**: Virtualization net savings, observation recovery rate, verification miss rate ($\text{MissRate} = P(\text{selected pass} \mid \text{broader fail})$), state rehydration rate, source reread rate, semantic packet omission/recovery, early-stop rescues/misses, lost-solve attribution.
+
+#### Decision Gates (Pre-Registered)
+- **FAIL**: Yield $\le 1.0\times$ Control.
+- **PROMISING**: $> 1.0\times$ Control and solve-rate delta within noise ($\pm 2\text{pp}$).
+- **USEFUL**: $\ge 1.25\times$ yield, solve rate $\ge \text{Control} - 3\text{pp}$.
+- **STRONG**: $\ge 1.5\times$ yield, solve rate $\ge \text{Control}$.
+- **BREAKTHROUGH**: $\ge 2.0\times$ yield, solve rate $\ge \text{Control}$.
 
 Durable 7-Arm Ablation Artifact: [`benchmarks/public/runs/swe_rebench_50_7arm_ablation.json`](file:///home/aqua/Projects/MinTok/benchmarks/public/runs/swe_rebench_50_7arm_ablation.json).
 

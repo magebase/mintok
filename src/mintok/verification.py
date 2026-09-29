@@ -227,3 +227,88 @@ class VerificationCompiler:
         }
 
         return digest_text, meta
+
+
+@dataclass
+class VerificationSafetyTracker:
+    """Tracks MissRate = P(selected tests pass | broader verification fails).
+
+    Guarantees internal fast-path test selection does not create false confidence.
+    On benchmark evaluations, the final checker runs regardless.
+    """
+
+    total_evaluations: int = 0
+    selected_passes: int = 0
+    broader_failures: int = 0
+    false_passes: int = 0  # selected passed, but broader failed
+
+    def record_event(self, selected_passed: bool, broader_passed: bool) -> None:
+        self.total_evaluations += 1
+        if selected_passed:
+            self.selected_passes += 1
+        if not broader_passed:
+            self.broader_failures += 1
+            if selected_passed:
+                self.false_passes += 1
+
+    @property
+    def miss_rate(self) -> float:
+        """P(selected tests pass | broader verification fails)."""
+        if self.broader_failures == 0:
+            return 0.0
+        return self.false_passes / float(self.broader_failures)
+
+    def is_safe(self, max_allowed_miss_rate: float = 0.05) -> bool:
+        return self.miss_rate <= max_allowed_miss_rate
+
+
+class PassVerificationCache:
+    """Caches passing test executions against code dependency hashes.
+
+    Avoids rerunning unchanged test suites when neither the test nor its
+    dependency closure has been altered.
+    """
+
+    def __init__(self) -> None:
+        # test_id -> dependency_hash
+        self._cached_passes: dict[str, str] = {}
+
+    def record_pass(self, test_id: str, dependency_hash: str) -> None:
+        self._cached_passes[test_id] = dependency_hash
+
+    def is_cached_pass(self, test_id: str, current_dependency_hash: str) -> bool:
+        cached_hash = self._cached_passes.get(test_id)
+        if not cached_hash:
+            return False
+        return cached_hash == current_dependency_hash
+
+    def invalidate(self, test_id: str | None = None) -> None:
+        if test_id:
+            self._cached_passes.pop(test_id, None)
+        else:
+            self._cached_passes.clear()
+
+
+class NonInformativeTestDetector:
+    """Detects repetitive, uninformative test failures that yield zero new signal."""
+
+    def __init__(self, threshold_repeats: int = 3) -> None:
+        self.threshold_repeats = threshold_repeats
+        # test_id -> (last_signature, repeat_count)
+        self._failure_history: dict[str, tuple[str, int]] = {}
+
+    def record_failure(self, test_id: str, failure_signature: str) -> bool:
+        """Record test failure. Returns True if this test is deemed non-informative."""
+        last_sig, count = self._failure_history.get(test_id, ("", 0))
+        if last_sig == failure_signature:
+            count += 1
+        else:
+            last_sig = failure_signature
+            count = 1
+
+        self._failure_history[test_id] = (last_sig, count)
+        return count >= self.threshold_repeats
+
+    def reset_for_test(self, test_id: str) -> None:
+        self._failure_history.pop(test_id, None)
+

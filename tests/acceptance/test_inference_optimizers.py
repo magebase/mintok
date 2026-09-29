@@ -12,6 +12,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 HARNESS_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(HARNESS_ROOT / "src"))
 
+from mintok.abi import estimate_tool_surface_tokens, get_filtered_tool_surface
 from mintok.controller import (
     CalibratedLocalController,
     StateFeatures,
@@ -19,16 +20,27 @@ from mintok.controller import (
 )
 from mintok.conversation import (
     CanonicalState,
+    ContextLifetime,
+    ContextObject,
+    ContextRentManager,
     EvidenceFact,
     FactResidencyTier,
     compute_state_delta,
+    evaluate_cache_aware_compaction_benefit,
 )
 from mintok.coprocessor import PacketUtilityTracker
 from mintok.early_stop import CleanContextRestart, ContinuationPredictor
-from mintok.source_cache import SourceCache
-from mintok.verification import VerificationCompiler
+from mintok.metrics import ProviderPricing, TokenUsageBreakdown
+from mintok.profiler import LostSolveCategory, attribute_lost_solve
+from mintok.source_cache import RegionStatus, SourceCache
+from mintok.verification import (
+    PassVerificationCache,
+    VerificationCompiler,
+    VerificationSafetyTracker,
+)
 
 scenarios("inference_optimizers.feature")
+
 
 
 # ---------------------------------------------------------------------------
@@ -352,3 +364,223 @@ def check_controller_action_selection(ctx: SimpleNamespace) -> None:
     best_act, best_q = ctx.controller.select_best_action(actions, base_dict)
     assert best_act in actions
     assert best_q > -float("inf")
+
+
+# ---------------------------------------------------------------------------
+# Scenario 9: Verification Safety Tracker & Miss Rate
+# ---------------------------------------------------------------------------
+
+
+@given("a verification safety tracker")
+def given_verification_safety_tracker(ctx: SimpleNamespace) -> None:
+    ctx.safety_tracker = VerificationSafetyTracker()
+
+
+@when(parsers.parse("{total:d} verification events occur with {false_passes:d} false pass and {failures:d} broader failures"))
+def when_verification_events_occur(ctx: SimpleNamespace, total: int, false_passes: int, failures: int) -> None:
+    for i in range(total):
+        if i < false_passes:
+            ctx.safety_tracker.record_event(selected_passed=True, broader_passed=False)
+        elif i < failures:
+            ctx.safety_tracker.record_event(selected_passed=False, broader_passed=False)
+        else:
+            ctx.safety_tracker.record_event(selected_passed=True, broader_passed=True)
+
+
+@then(parsers.parse("the computed miss rate is {expected:f}"))
+def check_computed_miss_rate(ctx: SimpleNamespace, expected: float) -> None:
+    assert ctx.safety_tracker.miss_rate == pytest.approx(expected, 0.01)
+
+
+@then(parsers.parse("the safety gate fails when max allowed miss rate is {max_rate:f}"))
+def check_safety_gate(ctx: SimpleNamespace, max_rate: float) -> None:
+    assert not ctx.safety_tracker.is_safe(max_rate)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 10: Passing Verification Cache
+# ---------------------------------------------------------------------------
+
+
+@given("a passing verification cache")
+def given_pass_cache(ctx: SimpleNamespace) -> None:
+    ctx.pass_cache = PassVerificationCache()
+
+
+@when(parsers.parse('test "{test_id}" passes for dependency hash "{h}"'))
+def when_test_passes_for_hash(ctx: SimpleNamespace, test_id: str, h: str) -> None:
+    ctx.pass_cache.record_pass(test_id, h)
+    ctx.test_id = test_id
+
+
+@then(parsers.parse('the test is confirmed as a cached pass for hash "{h}"'))
+def check_cached_pass(ctx: SimpleNamespace, h: str) -> None:
+    assert ctx.pass_cache.is_cached_pass(ctx.test_id, h) is True
+
+
+@then(parsers.parse('the test is not a cached pass for hash "{h}"'))
+def check_not_cached_pass(ctx: SimpleNamespace, h: str) -> None:
+    assert ctx.pass_cache.is_cached_pass(ctx.test_id, h) is False
+
+
+# ---------------------------------------------------------------------------
+# Scenario 11: Context Rent Manager Event-Driven Eviction
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse('a context rent manager with an admitted object associated with hypothesis "{h_id}"'))
+def given_context_rent_manager_with_obj(ctx: SimpleNamespace, h_id: str) -> None:
+    ctx.rent_mgr = ContextRentManager()
+    obj = ContextObject(
+        id="ctx_h1",
+        content="failing test traceback for hypothesis H1",
+        tokens=350,
+        lifetime=ContextLifetime.TASK_LONG,
+        associated_hypothesis=h_id,
+        expected_future_replays=10,
+        decision_value=0.9,
+    )
+    assert ctx.rent_mgr.admit(obj) is True
+
+
+@when(parsers.parse('an event "{event_type}" for "{h_id}" is triggered'))
+def when_event_triggered(ctx: SimpleNamespace, event_type: str, h_id: str) -> None:
+    ctx.evicted = ctx.rent_mgr.on_event(event_type, h_id)
+
+
+@then(parsers.parse('the object associated with "{h_id}" is evicted from active memory'))
+def check_object_evicted(ctx: SimpleNamespace, h_id: str) -> None:
+    assert "ctx_h1" in ctx.evicted
+    assert ctx.rent_mgr.get("ctx_h1") is None
+
+
+# ---------------------------------------------------------------------------
+# Scenario 12: Cache-Aware Compaction Benefit
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse("evaluating cache compaction for prefix {prefix:d} tokens and delta {delta:d} tokens across {turns:d} remaining turns"))
+def when_eval_compaction(ctx: SimpleNamespace, prefix: int, delta: int, turns: int) -> None:
+    ctx.net_benefit = evaluate_cache_aware_compaction_benefit(
+        prefix_tokens=prefix,
+        delta_tokens=delta,
+        remaining_turns=turns,
+    )
+
+
+@then("the net compaction benefit is positive")
+def check_net_benefit_positive(ctx: SimpleNamespace) -> None:
+    assert ctx.net_benefit > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Scenario 13: Source Cache SEEN vs RESIDENT Lifecycle
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse('a source cache with a resident span for "{file_path}" lines {start:d} to {end:d}'))
+def given_source_cache_resident_span(ctx: SimpleNamespace, file_path: str, start: int, end: int) -> None:
+    ctx.source_cache = SourceCache()
+    content = "def calculate_total():\n    return 42\n"
+    text, novelty = ctx.source_cache.register_span(file_path, start, end, content)
+    ctx.src_id = list(ctx.source_cache._regions_by_id.keys())[0]
+    assert ctx.source_cache._regions_by_id[ctx.src_id].status == RegionStatus.RESIDENT
+
+
+@when("the span is evicted from active context")
+def when_span_evicted(ctx: SimpleNamespace) -> None:
+    ctx.source_cache.mark_evicted(ctx.src_id)
+
+
+@then(parsers.parse('its status becomes "{expected}"'))
+def check_span_status(ctx: SimpleNamespace, expected: str) -> None:
+    assert ctx.source_cache._regions_by_id[ctx.src_id].status == expected
+
+
+@when("the span is rehydrated")
+def when_span_rehydrated(ctx: SimpleNamespace) -> None:
+    ctx.source_cache.rehydrate(ctx.src_id)
+
+
+# ---------------------------------------------------------------------------
+# Scenario 14: Dynamic Tool Surface Phase Filtering
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse('filtering tool surface for phase "{phase}"'))
+def when_filter_tool_surface(ctx: SimpleNamespace, phase: str) -> None:
+    ctx.filtered_tools = get_filtered_tool_surface(phase)
+    ctx.tool_tokens = estimate_tool_surface_tokens(phase)
+
+
+@then(parsers.parse('only "{t1}" and "{t2}" tools are exposed'))
+def check_filtered_tools(ctx: SimpleNamespace, t1: str, t2: str) -> None:
+    names = {t["name"] for t in ctx.filtered_tools}
+    assert names == {t1, t2}
+
+
+@then(parsers.parse('the tool surface tokens for "{phase}" are less than {max_tokens:d} tokens'))
+def check_filtered_tokens(ctx: SimpleNamespace, phase: str, max_tokens: int) -> None:
+    assert ctx.tool_tokens < max_tokens
+
+
+# ---------------------------------------------------------------------------
+# Scenario 15: Adaptive Semantic Packet Pruning
+# ---------------------------------------------------------------------------
+
+
+@when(parsers.parse('a packet of type "{p_type}" with {tokens:d} tokens has retriever disagreement'))
+def when_packet_disagreement(ctx: SimpleNamespace, p_type: str, tokens: int) -> None:
+    ctx.last_should_prune = ctx.tracker.should_prune(
+        packet_type=p_type,
+        candidate_tokens=tokens,
+        retriever_disagreement=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Scenario 16: Billed Dollars Accounting
+# ---------------------------------------------------------------------------
+
+
+@given(parsers.parse("a token usage breakdown with {fresh:d} fresh, {cached:d} cached, {output:d} output, and {reasoning:d} reasoning tokens"))
+def given_token_breakdown(ctx: SimpleNamespace, fresh: int, cached: int, output: int, reasoning: int) -> None:
+    ctx.breakdown = TokenUsageBreakdown(
+        t_fresh=fresh,
+        t_cached=cached,
+        t_output=output,
+        t_reasoning=reasoning,
+    )
+
+
+@when("computing billed cost under default pricing")
+def when_computing_billed_cost(ctx: SimpleNamespace) -> None:
+    ctx.billed_usd = ctx.breakdown.compute_billed_usd()
+
+
+@then(parsers.parse("the total billed cost is greater than {min_cost:f} and less than {max_cost:f} dollars"))
+def check_billed_cost_range(ctx: SimpleNamespace, min_cost: float, max_cost: float) -> None:
+    assert min_cost < ctx.billed_usd < max_cost
+
+
+# ---------------------------------------------------------------------------
+# Scenario 17: Lost Solve Attribution
+# ---------------------------------------------------------------------------
+
+
+@when("attributing a lost solve where the task was early stopped")
+def when_attributing_lost_solve(ctx: SimpleNamespace) -> None:
+    ctx.attribution = attribute_lost_solve(
+        task_id="task_123",
+        control_solved=True,
+        mintok_solved=False,
+        early_stopped=True,
+        tokens_saved=50000,
+    )
+
+
+@then(parsers.parse('the attribution category is "{expected}"'))
+def check_attribution_category(ctx: SimpleNamespace, expected: str) -> None:
+    assert ctx.attribution is not None
+    assert ctx.attribution.category == expected
+

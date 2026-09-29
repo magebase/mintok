@@ -383,3 +383,122 @@ class StateCompiler:
             self.state.current_patch = f"applied patch on {tool_args}"
 
         return self.state
+
+
+class ContextLifetime:
+    ONE_TURN = "one-turn"
+    UNTIL_TEST = "until-test"
+    UNTIL_PATCH = "until-patch"
+    TASK_LONG = "task-long"
+    REPO_LONG = "repo-long"
+
+
+@dataclass(frozen=True, slots=True)
+class ContextObject:
+    """An allocated context object subject to economic rent and lifecycle lease."""
+
+    id: str
+    content: str
+    tokens: int
+    lifetime: str = ContextLifetime.TASK_LONG
+    created_turn: int = 1
+    associated_hypothesis: str | None = None
+    associated_symbols: tuple[str, ...] = ()
+    expected_future_replays: int = 10
+    decision_value: float = 1.0
+
+    @property
+    def rent(self) -> int:
+        """Rent = tokens * expected future replays."""
+        return self.tokens * self.expected_future_replays
+
+    @property
+    def score(self) -> float:
+        """Lifetime-adjusted value: expected decision value / rent."""
+        return self.decision_value / float(max(1, self.rent))
+
+
+class ContextRentManager:
+    """Inference memory allocator: manages context leases, rent, and event-driven eviction."""
+
+    def __init__(self, rent_threshold: float = 0.0001) -> None:
+        self.rent_threshold = rent_threshold
+        self._objects: dict[str, ContextObject] = {}
+
+    def admit(self, obj: ContextObject) -> bool:
+        """Admit context object if its lifetime-adjusted score justifies the rent."""
+        if obj.decision_value >= 0.8 or obj.score >= self.rent_threshold:
+            self._objects[obj.id] = obj
+            return True
+        return False
+
+    def get(self, obj_id: str) -> ContextObject | None:
+        return self._objects.get(obj_id)
+
+    def active_objects(self) -> list[ContextObject]:
+        return list(self._objects.values())
+
+    def step_turn(self) -> list[str]:
+        """Advance turn, decaying replays and evicting expired ONE_TURN leases."""
+        evicted = []
+        updated = {}
+        for obj_id, obj in self._objects.items():
+            if obj.lifetime == ContextLifetime.ONE_TURN:
+                evicted.append(obj_id)
+                continue
+            replays = max(0, obj.expected_future_replays - 1)
+            updated[obj_id] = ContextObject(
+                id=obj.id,
+                content=obj.content,
+                tokens=obj.tokens,
+                lifetime=obj.lifetime,
+                created_turn=obj.created_turn,
+                associated_hypothesis=obj.associated_hypothesis,
+                associated_symbols=obj.associated_symbols,
+                expected_future_replays=replays,
+                decision_value=obj.decision_value,
+            )
+        self._objects = updated
+        return evicted
+
+    def on_event(self, event_type: str, payload: Any = None) -> list[str]:
+        """Event-triggered eviction (e.g. hypothesis rejected, patch modified, test passed)."""
+        evicted = []
+        remaining = {}
+        for obj_id, obj in self._objects.items():
+            should_evict = False
+            if event_type == "hypothesis_rejected" and obj.associated_hypothesis == str(payload):
+                should_evict = True
+            elif event_type == "test_passed" and obj.lifetime == ContextLifetime.UNTIL_TEST:
+                should_evict = True
+            elif event_type == "patch_changed" and payload:
+                modified_syms = set(payload) if isinstance(payload, (list, tuple, set)) else {str(payload)}
+                if any(sym in modified_syms for sym in obj.associated_symbols):
+                    should_evict = True
+
+            if should_evict:
+                evicted.append(obj_id)
+            else:
+                remaining[obj_id] = obj
+
+        self._objects = remaining
+        return evicted
+
+
+def evaluate_cache_aware_compaction_benefit(
+    prefix_tokens: int,
+    delta_tokens: int,
+    remaining_turns: int,
+    price_fresh: float = 3.0,
+    price_cached: float = 0.3,
+) -> float:
+    """Evaluate: savings_future_replay - cost_cache_invalidation.
+
+    savings_future_replay = delta_tokens * remaining_turns * price_cached
+    cost_cache_invalidation = prefix_tokens * (price_fresh - price_cached)
+    Returns net benefit in dollars (positive indicates compaction is cheaper).
+    """
+    savings_future_replay = float(delta_tokens * remaining_turns) * (price_cached / 1_000_000.0)
+    cost_cache_invalidation = float(prefix_tokens) * ((price_fresh - price_cached) / 1_000_000.0)
+    return savings_future_replay - cost_cache_invalidation
+

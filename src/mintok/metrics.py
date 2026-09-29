@@ -10,6 +10,38 @@ import math
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderPricing:
+    """Pricing rates per million tokens across provider billing dimensions."""
+
+    price_fresh_input_per_m: float = 3.00
+    price_cached_input_per_m: float = 0.30
+    price_output_per_m: float = 15.00
+    price_reasoning_per_m: float = 15.00
+
+
+@dataclass(frozen=True, slots=True)
+class TokenUsageBreakdown:
+    """Four independent counters for actual provider cost calculation."""
+
+    t_fresh: int = 0
+    t_cached: int = 0
+    t_output: int = 0
+    t_reasoning: int = 0
+
+    @property
+    def total_tokens(self) -> int:
+        return self.t_fresh + self.t_cached + self.t_output + self.t_reasoning
+
+    def compute_billed_usd(self, pricing: ProviderPricing | None = None) -> float:
+        p = pricing or ProviderPricing()
+        fresh_usd = (self.t_fresh / 1_000_000.0) * p.price_fresh_input_per_m
+        cached_usd = (self.t_cached / 1_000_000.0) * p.price_cached_input_per_m
+        output_usd = (self.t_output / 1_000_000.0) * p.price_output_per_m
+        reasoning_usd = (self.t_reasoning / 1_000_000.0) * p.price_reasoning_per_m
+        return fresh_usd + cached_usd + output_usd + reasoning_usd
+
+
+@dataclass(frozen=True, slots=True)
 class RunRecord:
     task_id: str
     arm: str
@@ -24,6 +56,7 @@ class RunRecord:
     latency_s: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
+    usage_breakdown: TokenUsageBreakdown | None = None
 
     @property
     def total_usd(self) -> float:
@@ -32,6 +65,7 @@ class RunRecord:
 
 def _arm(records: Iterable[RunRecord], arm: str) -> list[RunRecord]:
     return [r for r in records if r.arm == arm]
+
 
 
 def accepted_per_dollar(records: Iterable[RunRecord]) -> float:

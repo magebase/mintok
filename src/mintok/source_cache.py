@@ -19,6 +19,11 @@ from typing import Any
 from mintok.tokens import estimate_tokens
 
 
+class RegionStatus:
+    SEEN = "SEEN"          # Seen previously, but evicted from active model context
+    RESIDENT = "RESIDENT"  # Currently resident in compiled model context
+
+
 @dataclass(frozen=True, slots=True)
 class SourceRegion:
     """An immutable, content-addressable source code span."""
@@ -29,6 +34,8 @@ class SourceRegion:
     end_line: int
     content_hash: str
     tokens: int
+    content: str = ""
+    status: str = RegionStatus.RESIDENT
 
 
 class SourceCache:
@@ -57,6 +64,50 @@ class SourceCache:
         overlap_lines = min(total_lines, overlap_lines)
         return max(0.0, 1.0 - (overlap_lines / total_lines))
 
+    def mark_evicted(self, src_id: str) -> None:
+        """Evict a region from resident prompt context (transitions RESIDENT -> SEEN)."""
+        reg = self._regions_by_id.get(src_id)
+        if not reg:
+            return
+        # Replace with SEEN status
+        self._regions_by_id[src_id] = SourceRegion(
+            id=reg.id,
+            file_path=reg.file_path,
+            start_line=reg.start_line,
+            end_line=reg.end_line,
+            content_hash=reg.content_hash,
+            tokens=reg.tokens,
+            content=reg.content,
+            status=RegionStatus.SEEN,
+        )
+        # Remove from active intervals
+        if reg.file_path in self._visible_intervals:
+            interval = (reg.start_line, reg.end_line)
+            if interval in self._visible_intervals[reg.file_path]:
+                self._visible_intervals[reg.file_path].remove(interval)
+
+    def rehydrate(self, src_id: str) -> tuple[str, int]:
+        """Rehydrate a SEEN region back to RESIDENT status."""
+        reg = self._regions_by_id.get(src_id)
+        if not reg:
+            return f"error: region {src_id} not found", 0
+        self._regions_by_id[src_id] = SourceRegion(
+            id=reg.id,
+            file_path=reg.file_path,
+            start_line=reg.start_line,
+            end_line=reg.end_line,
+            content_hash=reg.content_hash,
+            tokens=reg.tokens,
+            content=reg.content,
+            status=RegionStatus.RESIDENT,
+        )
+        if reg.file_path not in self._visible_intervals:
+            self._visible_intervals[reg.file_path] = []
+        self._visible_intervals[reg.file_path].append((reg.start_line, reg.end_line))
+
+        header = f"[{reg.id} rehydrated: {reg.file_path}:{reg.start_line}-{reg.end_line}]"
+        return f"{header}\n{reg.content}", reg.tokens
+
     def register_span(
         self,
         file_path: str,
@@ -65,14 +116,18 @@ class SourceCache:
         content: str,
         file_hash: str = "",
     ) -> tuple[str, float]:
-        """Register a source span, returning either novel excerpt or content-addressable handle."""
+        """Register a source span, returning either novel excerpt, handle, or rehydrated text."""
         h = hashlib.sha256(f"{file_path}:{start_line}:{end_line}:{content}".encode("utf-8")).hexdigest()[:8]
         src_id = f"src:{h}"
 
-        # If identical region already seen, return handle reference
         if src_id in self._regions_by_id:
             reg = self._regions_by_id[src_id]
-            return f"[{src_id} unchanged: {file_path}:{start_line}-{end_line}]", 0.0
+            if reg.status == RegionStatus.RESIDENT:
+                return f"[{src_id} unchanged: {file_path}:{start_line}-{end_line}]", 0.0
+            else:
+                # Was seen previously, now re-requested -> rehydrate into active context
+                text, _ = self.rehydrate(src_id)
+                return text, 1.0
 
         novelty = self.compute_novelty(file_path, start_line, end_line)
 
@@ -88,11 +143,12 @@ class SourceCache:
             end_line=end_line,
             content_hash=h,
             tokens=estimate_tokens(content),
+            content=content,
+            status=RegionStatus.RESIDENT,
         )
         self._regions_by_id[src_id] = reg
         self._hash_to_id[h] = src_id
 
-        # If substantial novelty, return content with handle header
         header = f"[{src_id}: {file_path}:{start_line}-{end_line}]"
         return f"{header}\n{content}", novelty
 

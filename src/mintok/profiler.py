@@ -225,3 +225,122 @@ def profile_trajectory_waterfall(events: list[dict[str, Any]]) -> TokenWaterfall
         else:
             wf.other += toks
     return wf
+
+
+@dataclass(frozen=True, slots=True)
+class CostWaterfall:
+    """Itemized dollar cost breakdown across provider billing dimensions."""
+
+    fresh_input_usd: float = 0.0
+    cache_read_usd: float = 0.0
+    cache_write_usd: float = 0.0
+    output_usd: float = 0.0
+    reasoning_usd: float = 0.0
+
+    @property
+    def total_usd(self) -> float:
+        return (
+            self.fresh_input_usd
+            + self.cache_read_usd
+            + self.cache_write_usd
+            + self.output_usd
+            + self.reasoning_usd
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TrajectoryEfficiencyMetrics:
+    """Detailed waste, tax, and timing metrics for an agent trajectory."""
+
+    task_id: str
+    total_tokens: int
+    dead_token_ratio: float = 0.0
+    tokens_to_first_decisive_evidence: int = 0
+    post_decisive_waste_tokens: int = 0
+    rediscovery_tax_tokens: int = 0
+    navigation_tax_tokens: int = 0
+    recovery_tax_tokens: int = 0
+    policy_regret_usd: float = 0.0
+
+
+class LostSolveCategory:
+    """Attribution taxonomy for tasks solved by Control baseline but missed by MinTok."""
+
+    VIRTUALIZATION_OMISSION = "virtualization_omission"
+    STATE_COMPACTION_OMISSION = "state_compaction_omission"
+    SOURCE_DEDUP_SUPPRESSION = "source_dedup_suppression"
+    SEMANTIC_PACKET_PRUNING = "semantic_packet_pruning"
+    VERIFICATION_UNDER_TESTING = "verification_under_testing"
+    PREMATURE_EARLY_STOP = "premature_early_stop"
+    CONTROLLER_MISROUTING = "controller_misrouting"
+    MODEL_VARIANCE = "model_variance"
+
+
+@dataclass(frozen=True, slots=True)
+class LostSolveAttribution:
+    """Attribution record explaining a lost solve."""
+
+    task_id: str
+    category: str
+    explanation: str
+    tokens_saved: int = 0
+
+
+def attribute_lost_solve(
+    task_id: str,
+    control_solved: bool,
+    mintok_solved: bool,
+    early_stopped: bool = False,
+    verification_missed: bool = False,
+    packet_omitted: bool = False,
+    source_suppressed: bool = False,
+    virtualization_omitted: bool = False,
+    tokens_saved: int = 0,
+) -> LostSolveAttribution | None:
+    """Classify the root cause of a Control-only solve."""
+    if not control_solved or mintok_solved:
+        return None
+
+    if early_stopped:
+        return LostSolveAttribution(
+            task_id=task_id,
+            category=LostSolveCategory.PREMATURE_EARLY_STOP,
+            explanation="Early stop continuation hazard aborted before task resolution",
+            tokens_saved=tokens_saved,
+        )
+    if verification_missed:
+        return LostSolveAttribution(
+            task_id=task_id,
+            category=LostSolveCategory.VERIFICATION_UNDER_TESTING,
+            explanation="Targeted test passed while broader test suite had unresolved regressions",
+            tokens_saved=tokens_saved,
+        )
+    if packet_omitted:
+        return LostSolveAttribution(
+            task_id=task_id,
+            category=LostSolveCategory.SEMANTIC_PACKET_PRUNING,
+            explanation="AST neighborhood pruning omitted critical caller containing bug",
+            tokens_saved=tokens_saved,
+        )
+    if source_suppressed:
+        return LostSolveAttribution(
+            task_id=task_id,
+            category=LostSolveCategory.SOURCE_DEDUP_SUPPRESSION,
+            explanation="Source deduplication suppressed code span required for semantic fix",
+            tokens_saved=tokens_saved,
+        )
+    if virtualization_omitted:
+        return LostSolveAttribution(
+            task_id=task_id,
+            category=LostSolveCategory.VIRTUALIZATION_OMISSION,
+            explanation="Tool output digest omitted key error message line",
+            tokens_saved=tokens_saved,
+        )
+
+    return LostSolveAttribution(
+        task_id=task_id,
+        category=LostSolveCategory.MODEL_VARIANCE,
+        explanation="Stochastic model completion variance on identical evidence",
+        tokens_saved=tokens_saved,
+    )
+
