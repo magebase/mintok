@@ -1363,6 +1363,44 @@ Durable Run Record: [`swe_rebench_window_eval_50_stealth_space_bunny_alpha_adapt
 
 ---
 
+## MinTok 3.0: The Runtime Inference Optimizer Architecture
+
+Following the 50-task empirical audit which demonstrated that sequential escalation ladders (L0–L4) caused 100% of tasks to fall back to L4 while exhausting turn budgets, MinTok 3.0 abandons capability withholding in favor of **transport-layer virtualization** and **state compilation**.
+
+### Core Architecture (Six Layers)
+
+1. **Layer 1 — Always-Available Execution**:
+   - `shell`, `patch`, `read`, `suite`, `grep`, and `find_files` are available from turn 0.
+   - The agent is never handicapped or constrained by artificial capability boundaries.
+
+2. **Layer 2 — Tool-Output Virtualization & Information Firewall (`src/mintok/virtualization.py`)**:
+   - Intercepts voluminous tool outputs (`pytest`, `find`, `git diff`, `grep`, and long shell commands) before injection into model context.
+   - Summarizes executions into structured semantic digests (`exit`, `passed`, `failed`, primary failure, new failure signature detection).
+   - Stores raw payloads in a local content-addressable `ObservationStore` returning recoverable handles (`obs:xxxx`, `trace:yyyy`).
+   - Content-addressable deduplication: identical output across consecutive turns renders as `[unchanged: obs:xxxx]`.
+   - On-demand retrieval via `expand obs:xxxx --match <pat> --lines <N-M>`.
+
+3. **Layer 3 — Conversation-State Compilation (`src/mintok/conversation.py`)**:
+   - Compiles verbose multi-turn history into a compact `CanonicalState` (Goal, Verified Facts, Active Hypothesis, Rejected Hypotheses, Known Files/Symbols, Current Patch, Current Failures, Next Step).
+   - Eliminates quadratic token growth while preserving prompt-cache locality and critical reasoning facts.
+
+4. **Layer 4 — Repository Execution Profiles (`src/mintok/repo_profile.py`)**:
+   - Durable, pre-computed `RepoProfile` capturing package managers, test runners, key directories, monorepo packages, and topological complexity scores.
+   - Injects a compact (~100-token) execution profile into initial agent context, eliminating redundant exploration.
+
+5. **Layer 5 — Macro-Actions & Semantic Coprocessor (`src/mintok/coprocessor.py`)**:
+   - Exposes compound macro-actions:
+     - `investigate_failure`: parses test tracebacks, maps stack frames to AST symbols, and bundles callers/slices.
+     - `localize_symbol`: looks up definition, signature, and callers in a single operation.
+     - `assess_patch`: runs pre-flight AST sanity checks, detects unresolved imports, and estimates risk.
+   - Runs 5–20 deterministic static analysis operations locally in **0 frontier turns**.
+
+6. **Layer 6 — Utility-Driven Pre-Flight Routing (`src/mintok/router.py`)**:
+   - Calculates utility $U = V \cdot \text{solved} - \lambda \cdot T$ balancing task success against token consumption.
+   - Integrates repository complexity priors: codebases with complexity $\ge 0.50$ or $\ge 4$ subpackages route immediately to `virtualized-shell` / `control`, avoiding blind single-file assumptions.
+
+---
+
 *Archived for reference and continuity; superseded by the September 2026 free model matrix above:*
 
 | Model Family | Provider Architecture | Tasks | Control Solve | MinTok Solve | Solve Delta | Efficiency Multiplier [95% CI] | GeoMean Savings [95% CI] | Gate Status |

@@ -60,3 +60,18 @@ Feature: Deterministic pre-flight task router
     Then the record selects "semantic-C"
     And the record contains the feature "target_loc" with value 118
     And the record contains "actual" for both backends
+
+  Scenario: High-complexity monorepo profile routes to control
+    Given an instruction "Add a tip_cents keyword parameter (default 0) to compute_total in src/azure/pricing.py"
+    And target files: "src/azure/pricing.py"=118
+    And a repository profile with complexity 0.75 and strategy "virtualized-shell"
+    When the task is routed
+    Then the backend is "control"
+    And the predicted class is "monorepo_complexity"
+    And the reasons include "monorepo complexity"
+
+  Scenario: Prediction record calculates utility for paired comparison
+    Given an instruction "Fix token count in src/shopcart/calc.py"
+    And target files: "src/shopcart/calc.py"=50
+    When the task "utility-task-01" is routed with actual outcomes control=2000/solved and semantic-C=1000/solved
+    Then the utility for "semantic-C" is higher than "control"

@@ -158,6 +158,25 @@ POLICIES: dict[str, dict] = {
         "breaker": False,
         "escalation": True,
     },
+    # v3: MinTok 3.0 runtime inference optimizer. Unrestricted execution
+    # with tool-output virtualization and macro-actions.
+    "v3": {
+        "tools": {
+            "shell",
+            "patch",
+            "read",
+            "suite",
+            "expand",
+            "grep",
+            "find_files",
+            "slice",
+            "investigate_failure",
+            "localize_symbol",
+        },
+        "ops": set(),
+        "breaker": False,
+        "virtual_output": True,
+    },
 }
 
 
@@ -291,6 +310,18 @@ def main(argv: list[str] | None = None) -> int:
     grep_p.add_argument("pattern", help="text or regex pattern")
     grep_p.add_argument("--path", default=None, help="subpath to search within")
 
+    expand = sub.add_parser("expand", help="expand an observation handle (arm v3)")
+    expand.add_argument("handle", help="observation handle (e.g. obs:71af)")
+    expand.add_argument("--filter", dest="filter", default=None, help="filter substring")
+    expand.add_argument("--start", dest="start", type=int, default=0, help="start line")
+    expand.add_argument("--count", dest="count", type=int, default=50, help="max lines")
+
+    inv = sub.add_parser("investigate_failure", help="macro-action: investigate failure traceback (arm v3)")
+    inv.add_argument("--traceback", dest="traceback", default=None, help="optional failure traceback")
+
+    loc = sub.add_parser("localize_symbol", help="macro-action: bundle definition and callers (arm v3)")
+    loc.add_argument("symbol", help="symbol name")
+
     args = parser.parse_args(argv)
     policy = POLICIES.get(args.policy)
     if policy is None:
@@ -305,6 +336,27 @@ def main(argv: list[str] | None = None) -> int:
     entry: dict = {"tool": args.tool}
 
     def finish(output: str, exit_code: int, extra: dict | None = None) -> int:
+        if policy.get("virtual_output") and args.tool in ("shell", "suite", "find_files", "grep"):
+            from mintok.virtualization import Observation, ObservationStore, ToolOutputVirtualizer
+            obs_dir = args.log.parent / "observations"
+            obs_dir.mkdir(parents=True, exist_ok=True)
+            store = ObservationStore()
+            for p in obs_dir.glob("*.json"):
+                try:
+                    data = json.loads(p.read_text())
+                    store._by_id[data["id"]] = Observation(**data)
+                    store._last_by_cmd[data["command"]] = data["id"]
+                except Exception:
+                    pass
+            virt = ToolOutputVirtualizer(store=store)
+            cmd_repr = args.command if args.tool == "shell" else args.tool
+            output, obs = virt.virtualize(cmd_repr, output, exit_code=exit_code)
+            if obs:
+                obs_file = obs_dir / f"{obs.id.replace(':', '_')}.json"
+                obs_file.write_text(json.dumps({
+                    "id": obs.id, "command": obs.command, "content": obs.content,
+                    "tokens": obs.tokens, "created_at": obs.created_at, "metadata": obs.metadata
+                }))
         entry["output"] = output
         entry["exit_code"] = exit_code
         if extra:
@@ -715,6 +767,45 @@ def main(argv: list[str] | None = None) -> int:
         append(args.log, entry)
         print(("PASS" if result.passed else "FAIL") + "\n" + result.tail)
         return result.exit_code
+
+    if args.tool == "expand":
+        entry["args"] = {"handle": args.handle, "filter": args.filter, "start": args.start, "count": args.count}
+        obs_dir = args.log.parent / "observations"
+        obs_file = obs_dir / f"{args.handle.replace(':', '_')}.json"
+        if not obs_file.exists():
+            return finish(f"error: observation '{args.handle}' not found", 1)
+        data = json.loads(obs_file.read_text())
+        from mintok.virtualization import ObservationStore
+        store = ObservationStore()
+        store.store(data["command"], data["content"], metadata=data.get("metadata"))
+        expanded = store.expand(args.handle, filter_str=args.filter, start_line=args.start, max_lines=args.count)
+        return finish(expanded, 0)
+
+    if args.tool == "investigate_failure":
+        entry["args"] = args.traceback
+        from mintok.coprocessor import SemanticCoprocessor
+        coproc = SemanticCoprocessor(args.root)
+        tb = args.traceback
+        if not tb and args.log.exists():
+            for line in reversed(args.log.read_text().splitlines()):
+                if not line.strip():
+                    continue
+                try:
+                    e = json.loads(line)
+                    if e.get("tool") in ("suite", "shell") and e.get("exit_code", 0) != 0:
+                        tb = str(e.get("output", ""))
+                        break
+                except Exception:
+                    pass
+        pkt = coproc.investigate_failure(args.root, tb or "")
+        return finish(pkt.render(), 0)
+
+    if args.tool == "localize_symbol":
+        entry["args"] = args.symbol
+        from mintok.coprocessor import SemanticCoprocessor
+        coproc = SemanticCoprocessor(args.root)
+        pkt = coproc.localize_symbol(args.root, args.symbol)
+        return finish(pkt.render(), 0)
 
     return 2
 

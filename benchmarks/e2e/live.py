@@ -97,6 +97,14 @@ DISCIPLINE = {
         "Verify your changes with the suite tool before finishing. "
         "When the suite passes and you are done, reply with a short summary and no tool call."
     ),
+    "v3": (
+        "You are an expert software engineer working in a copy of a repository. "
+        "Solve the task using all available tools (shell, patch, read, grep, find_files, suite). "
+        "All tool outputs are virtualized: voluminous outputs are summarized with an 'obs:<id>' handle. "
+        "Use expand(handle, filter) if you need raw output lines from an observation handle. "
+        "Use investigate_failure or localize_symbol for fast deterministic macro-inspections. "
+        "Run the suite tool before finishing. When tests pass, reply with a short summary and no tool call."
+    ),
 }
 
 TOOL_SCHEMAS = {
@@ -266,6 +274,117 @@ TOOL_SCHEMAS = {
             "input_schema": {"type": "object", "properties": {}},
         },
     ],
+    "v3": [
+        {
+            "name": "shell",
+            "description": "Run an arbitrary shell command in the task root. Output is virtualized if large.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+        {
+            "name": "expand",
+            "description": "Expand an observation handle (obs:xxxx) to inspect raw output lines.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "handle": {"type": "string", "description": "observation handle like 'obs:71af'"},
+                    "filter": {"type": "string", "description": "optional substring filter"},
+                    "start": {"type": "integer", "description": "start line (0-indexed)"},
+                    "count": {"type": "integer", "description": "maximum lines to retrieve"},
+                },
+                "required": ["handle"],
+            },
+        },
+        {
+            "name": "read",
+            "description": "Bounded raw-file region read.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "start": {"type": "integer"},
+                    "end": {"type": "integer"},
+                },
+                "required": ["path"],
+            },
+        },
+        {
+            "name": "patch",
+            "description": "Replace a 1-based inclusive line range with new source.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "file": {"type": "string"},
+                    "start": {"type": "integer"},
+                    "end": {"type": "integer"},
+                    "source": {"type": "string", "description": "replacement lines"},
+                },
+                "required": ["file", "start", "end", "source"],
+            },
+        },
+        {
+            "name": "grep",
+            "description": "Grep for text or regex across repository source files.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "regex or string pattern to search"},
+                    "path": {"type": "string", "description": "optional subpath to limit search"},
+                },
+                "required": ["pattern"],
+            },
+        },
+        {
+            "name": "find_files",
+            "description": "Find files in repository matching a glob pattern (e.g. '*parser*' or '*.lark').",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "glob pattern"},
+                },
+            },
+        },
+        {
+            "name": "slice",
+            "description": "Ranked exact source regions for a description of what to find or change.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "what to find or change, in plain words"},
+                },
+                "required": ["description"],
+            },
+        },
+        {
+            "name": "investigate_failure",
+            "description": "Macro-action: locate failing stack frame, map to AST symbol, and extract slice + callers.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "traceback": {"type": "string", "description": "optional traceback text"},
+                },
+            },
+        },
+        {
+            "name": "localize_symbol",
+            "description": "Macro-action: locate definition, signature, and callers for a symbol in 1 step.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "symbol name"},
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
+            "name": "suite",
+            "description": "Run the task copy's full test suite.",
+            "input_schema": {"type": "object", "properties": {}},
+        },
+    ],
 }
 
 
@@ -314,6 +433,23 @@ def execute_tool(root: Path, log: Path, policy: str, name: str, args: dict) -> t
         elif name == "suite":
             cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "suite", "--quiet"]
             stdin = None
+        elif name == "expand":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "expand", args["handle"]]
+            if args.get("filter"):
+                cmd.extend(["--filter", str(args["filter"])])
+            if args.get("start") is not None:
+                cmd.extend(["--start", str(args["start"])])
+            if args.get("count") is not None:
+                cmd.extend(["--count", str(args["count"])])
+            stdin = None
+        elif name == "investigate_failure":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "investigate_failure"]
+            if args.get("traceback"):
+                cmd.extend(["--traceback", str(args["traceback"])])
+            stdin = None
+        elif name == "localize_symbol":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "localize_symbol", str(args["symbol"])]
+            stdin = None
         else:
             return f"error: unknown tool {name}", 1
     except (KeyError, TypeError) as err:
@@ -357,7 +493,17 @@ def run_loop(
 
     system = DISCIPLINE[policy]
     tools = TOOL_SCHEMAS[policy]
-    messages: list[dict] = [{"role": "user", "content": instruction}]
+    if policy == "v3":
+        from mintok.conversation import StateCompiler
+        from mintok.repo_profile import scan_repo_profile
+
+        profile = scan_repo_profile(root)
+        profile_header = profile.render_context()
+        messages: list[dict] = [{"role": "user", "content": f"{profile_header}\n\nTask:\n{instruction}"}]
+        compiler = StateCompiler(initial_goal=instruction)
+    else:
+        messages: list[dict] = [{"role": "user", "content": instruction}]
+        compiler = None
     turns = 0
     completed = False
     usage_total = _empty_usage()
@@ -418,6 +564,14 @@ def run_loop(
                         "role": "user",
                         "content": "[harness] Escalation Level 4 reached: stagnation detected. Unrestricted shell is now unlocked to diagnose, run tests, and fix the issue directly.",
                     })
+        elif policy == "v3":
+            turn_tools = tools
+            if compiler is not None and turns >= 4 and turns % 3 == 0 and len(messages) > 4:
+                compiled_view = compiler.state.render()
+                messages = [
+                    messages[0],
+                    {"role": "user", "content": f"[harness compiled working state]\n{compiled_view}"},
+                ] + messages[-2:]
         else:
             turn_tools = tools
         started = time.monotonic()
@@ -488,6 +642,15 @@ def run_loop(
             )
         messages.append({"role": "assistant", "content": blocks})
         messages.append({"role": "user", "content": results})
+        if policy == "v3" and compiler is not None:
+            for call, res in zip(calls, results):
+                compiler.process_turn(
+                    role="tool",
+                    content="",
+                    tool=call["name"],
+                    tool_args=call.get("input", {}),
+                    tool_output=res.get("content", ""),
+                )
     usage_total["turns"] = turns
     usage_total["model"] = model
     usage_total["provider"] = provider

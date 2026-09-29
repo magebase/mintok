@@ -15,6 +15,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mintok.repo_profile import RepoProfile
 
 BACKEND_CONTROL = "control"
 BACKEND_SEMANTIC = "semantic-C"
@@ -31,6 +35,7 @@ EXPECTED_COST = {
     "cross_file_bug": 1.12,
     "refactor": 1.40,
     "large_file_navigation": 2.62,
+    "monorepo_complexity": 1.00,
 }
 CONTROL_COST = 1.0
 
@@ -93,12 +98,26 @@ _FEATURE_CUES = (
 _PATH_RE = re.compile(r"[\w./-]+\.py")
 
 
+def compute_utility(
+    solved: bool,
+    tokens: int,
+    value: float = 1.0,
+    token_lambda: float = 1e-6,
+) -> float:
+    """Compute task execution utility: U = value * solved - lambda * tokens.
+
+    Balances task completion against context token consumption.
+    """
+    return (value if solved else 0.0) - (token_lambda * tokens)
+
+
 @dataclass(frozen=True, slots=True)
 class PreFlightFeatures:
     """Everything the router may look at, all available before run time."""
 
     instruction: str
     target_sizes: dict[str, int]  # repo-relative .py path -> LOC
+    repo_profile: RepoProfile | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,10 +140,9 @@ def _max_loc(features: PreFlightFeatures, paths: list[str]) -> int:
 def route(features: PreFlightFeatures) -> RouteDecision:
     """First-match rule chain over wording cues and target module size.
 
-    Order encodes mechanism: additive signature work beats structural
-    rework beats additive features beats defect seams beats schema work.
-    Cue choice and ordering were tuned on the frozen-eval instructions; a
-    fresh generated task set is the honest test of generalization.
+    Order encodes mechanism: monorepo complexity beats additive signature work
+    beats structural rework beats additive features beats defect seams beats
+    schema work.
     """
     text = features.instruction
     paths = _PATH_RE.findall(text)
@@ -135,6 +153,12 @@ def route(features: PreFlightFeatures) -> RouteDecision:
         if backend == BACKEND_SLICER:
             cost = CONTROL_COST  # slicer bar: beat control's targeted retrieval
         return RouteDecision(backend, klass, cost, confidence, reasons)
+
+    if features.repo_profile is not None and features.repo_profile.recommended_strategy == "virtualized-shell":
+        reasons.append(
+            f"monorepo complexity ({features.repo_profile.complexity_score:.2f}) prioritizes broad shell execution"
+        )
+        return decide(BACKEND_CONTROL, "monorepo_complexity", 0.90)
 
     hits = _cues(text, _API_CUES)
     if hits:
@@ -183,6 +207,8 @@ def prediction_record(
             "instruction": features.instruction,
             "target_loc": _max_loc(features, paths),
             "files_mentioned": paths,
+            "repo_complexity": features.repo_profile.complexity_score if features.repo_profile else 0.0,
+            "recommended_strategy": features.repo_profile.recommended_strategy if features.repo_profile else "compressed-first",
         },
         "backend": decision.backend,
         "predicted_class": decision.predicted_class,
@@ -192,4 +218,11 @@ def prediction_record(
     }
     if actual is not None:
         record["actual"] = actual
+        record["utilities"] = {
+            backend_name: compute_utility(
+                solved=data.get("solved", False),
+                tokens=data.get("tokens", 0),
+            )
+            for backend_name, data in actual.items()
+        }
     return record
