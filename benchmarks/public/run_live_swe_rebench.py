@@ -68,7 +68,7 @@ def prepare_live_workspace(
 ) -> bool:
     """Clone official repository and checkout base_commit."""
     if dest.exists():
-        shutil.rmtree(dest)
+        shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
 
     clone_url = f"https://github.com/{repo}.git"
@@ -78,52 +78,73 @@ def prepare_live_workspace(
     if not (cache_repo / "HEAD").exists():
         cache_repo.parent.mkdir(parents=True, exist_ok=True)
         print(f"  [cache] Mirroring {repo} to local cache...")
-        subprocess.run(
-            ["git", "clone", "--bare", clone_url, str(cache_repo)],
-            capture_output=True,
-            timeout=180,
-        )
+        try:
+            subprocess.run(
+                ["git", "clone", "--bare", clone_url, str(cache_repo)],
+                capture_output=True,
+                timeout=600,
+            )
+        except Exception as e:
+            print(f"  [cache] Mirroring failed for {repo}: {e}")
+            if cache_repo.exists():
+                shutil.rmtree(cache_repo, ignore_errors=True)
 
+    cloned_ok = False
     if (cache_repo / "HEAD").exists():
-        res = subprocess.run(
-            ["git", "clone", str(cache_repo), str(dest)],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    else:
-        res = subprocess.run(
-            ["git", "clone", clone_url, str(dest)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        try:
+            res = subprocess.run(
+                ["git", "clone", str(cache_repo), str(dest)],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            cloned_ok = (res.returncode == 0)
+        except Exception:
+            cloned_ok = False
 
-    if res.returncode != 0:
-        print(f"  [error] Clone failed for {repo}: {res.stderr[:200]}")
-        return False
+    if not cloned_ok:
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        dest.mkdir(parents=True, exist_ok=True)
+        try:
+            res = subprocess.run(
+                ["git", "clone", clone_url, str(dest)],
+                capture_output=True,
+                text=True,
+                timeout=600,
+            )
+            if res.returncode != 0:
+                print(f"  [error] Clone failed for {repo}: {res.stderr[:200]}")
+                return False
+        except Exception as e:
+            print(f"  [error] Clone exception for {repo}: {e}")
+            return False
 
-    c_res = subprocess.run(
-        ["git", "checkout", base_commit],
-        cwd=dest,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if c_res.returncode != 0:
-        # Fetch PR ref or all branches if commit not on default branch
-        subprocess.run(["git", "remote", "set-url", "origin", clone_url], cwd=dest, capture_output=True, timeout=10)
-        subprocess.run(["git", "fetch", "--all"], cwd=dest, capture_output=True, timeout=60)
-        c_res2 = subprocess.run(
+    try:
+        c_res = subprocess.run(
             ["git", "checkout", base_commit],
             cwd=dest,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
-        if c_res2.returncode != 0:
-            print(f"  [error] Checkout failed for {repo} @ {base_commit}: {c_res2.stderr[:200]}")
-            return False
+        if c_res.returncode != 0:
+            # Fetch PR ref or all branches if commit not on default branch
+            subprocess.run(["git", "remote", "set-url", "origin", clone_url], cwd=dest, capture_output=True, timeout=15)
+            subprocess.run(["git", "fetch", "--all"], cwd=dest, capture_output=True, timeout=180)
+            c_res2 = subprocess.run(
+                ["git", "checkout", base_commit],
+                cwd=dest,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if c_res2.returncode != 0:
+                print(f"  [error] Checkout failed for {repo} @ {base_commit}: {c_res2.stderr[:200]}")
+                return False
+    except Exception as e:
+        print(f"  [error] Checkout exception for {repo}: {e}")
+        return False
 
     return True
 
