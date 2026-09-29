@@ -121,12 +121,83 @@ class PreFlightFeatures:
 
 
 @dataclass(frozen=True, slots=True)
+class PolicyExpectation:
+    """Pre-flight expectation of policy performance on a given task state."""
+
+    policy: str
+    p_success: float
+    expected_tokens: int
+    expected_utility: float
+
+
+def estimate_policy_expectation(
+    policy: str,
+    features: PreFlightFeatures,
+    value: float = 1.0,
+    token_lambda: float = 1e-6,
+) -> PolicyExpectation:
+    """Explicitly estimate P(success | features, policy) and E(tokens | features, policy).
+
+    Derives expected utility: U_hat = value * P(success) - token_lambda * E(tokens).
+    """
+    text = features.instruction
+    paths = _PATH_RE.findall(text)
+    max_loc = _max_loc(features, paths)
+    is_monorepo = features.repo_profile is not None and (
+        features.repo_profile.complexity_score >= 0.50
+        or features.repo_profile.recommended_strategy == "virtualized-shell"
+    )
+
+    if is_monorepo:
+        if policy in (BACKEND_CONTROL, "virtualized-shell"):
+            p, tokens = 0.75, 3200
+        elif policy == BACKEND_SLICER:
+            p, tokens = 0.45, 4500
+        else:
+            p, tokens = 0.35, 5800
+    elif max_loc >= LARGE_MODULE_LOC:
+        if policy == BACKEND_SLICER:
+            p, tokens = 0.85, 1600
+        elif policy in (BACKEND_CONTROL, "virtualized-shell"):
+            p, tokens = 0.70, 4200
+        else:
+            p, tokens = 0.60, 4800
+    elif _cues(text, _REFACTOR_CUES) or _cues(text, _CROSS_CUES):
+        if policy in (BACKEND_CONTROL, "virtualized-shell"):
+            p, tokens = 0.88, 2400
+        else:
+            p, tokens = 0.65, 3600
+    elif _cues(text, _API_CUES) or _cues(text, _FEATURE_CUES) or _cues(text, _SCHEMA_CUES):
+        if policy == BACKEND_SEMANTIC:
+            p, tokens = 0.95, 950
+        elif policy == "virtualized-shell":
+            p, tokens = 0.92, 1400
+        else:
+            p, tokens = 0.88, 2200
+    else:
+        if policy == BACKEND_SEMANTIC:
+            p, tokens = 0.90, 1100
+        else:
+            p, tokens = 0.85, 2100
+
+    u_hat = (value * p) - (token_lambda * tokens)
+    return PolicyExpectation(
+        policy=policy,
+        p_success=p,
+        expected_tokens=tokens,
+        expected_utility=u_hat,
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class RouteDecision:
     backend: str
     predicted_class: str
     expected_relative_cost: float
     confidence: float
     reasons: list[str] = field(default_factory=list)
+    expected_utility: float = 0.0
+    policy_expectations: dict[str, PolicyExpectation] = field(default_factory=dict)
 
 
 def _cues(text: str, patterns: tuple[str, ...]) -> list[str]:
@@ -148,11 +219,29 @@ def route(features: PreFlightFeatures) -> RouteDecision:
     paths = _PATH_RE.findall(text)
     reasons: list[str] = []
 
+    exp_control = estimate_policy_expectation(BACKEND_CONTROL, features)
+    exp_semantic = estimate_policy_expectation(BACKEND_SEMANTIC, features)
+    exp_slicer = estimate_policy_expectation(BACKEND_SLICER, features)
+    expectations = {
+        BACKEND_CONTROL: exp_control,
+        BACKEND_SEMANTIC: exp_semantic,
+        BACKEND_SLICER: exp_slicer,
+    }
+
     def decide(backend: str, klass: str, confidence: float) -> RouteDecision:
         cost = CONTROL_COST if backend == BACKEND_CONTROL else EXPECTED_COST[klass]
         if backend == BACKEND_SLICER:
             cost = CONTROL_COST  # slicer bar: beat control's targeted retrieval
-        return RouteDecision(backend, klass, cost, confidence, reasons)
+        chosen_exp = expectations.get(backend, exp_control)
+        return RouteDecision(
+            backend=backend,
+            predicted_class=klass,
+            expected_relative_cost=cost,
+            confidence=confidence,
+            reasons=reasons,
+            expected_utility=chosen_exp.expected_utility,
+            policy_expectations=expectations,
+        )
 
     if features.repo_profile is not None and features.repo_profile.recommended_strategy == "virtualized-shell":
         reasons.append(
@@ -215,6 +304,16 @@ def prediction_record(
         "expected_relative_cost": decision.expected_relative_cost,
         "confidence": decision.confidence,
         "reasons": decision.reasons,
+        "expected_utility": decision.expected_utility,
+        "policy_expectations": {
+            k: {
+                "policy": v.policy,
+                "p_success": v.p_success,
+                "expected_tokens": v.expected_tokens,
+                "expected_utility": v.expected_utility,
+            }
+            for k, v in decision.policy_expectations.items()
+        },
     }
     if actual is not None:
         record["actual"] = actual

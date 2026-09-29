@@ -37,3 +37,27 @@ Feature: Semantic coprocessor and macro-actions
     When a patch modifies internal logic of "format_record" without changing signature
     Then the patch assessment classifies the change as "body_only"
     And interface compatibility is preserved
+
+  Scenario: Tracing state writers locates attribute mutations across modules
+    Given a Python repository with attribute assignment "self.status = 'active'" in "src/models.py"
+    When macro-action "find_state_writers" is invoked for attribute "status"
+    Then the state writers list includes "src/models.py"
+
+  Scenario: Proactive failure diagnosis automatically localizes symbol in zero frontier turns
+    Given a Python repository with a failing function in "src/service.py":
+      """
+      def compute_rate(val):
+          if val == 0:
+              raise ZeroDivisionError("division by zero")
+          return 100 / val
+      """
+    When a test failure occurs with traceback pointing to "src/service.py:4"
+    And proactive failure diagnosis is automatically performed
+    Then the diagnostic identifies target symbol "compute_rate"
+    And the diagnostic identifies target file "src/service.py"
+
+  Scenario: Computing change ripple identifies direct and indirect callers
+    Given a repository with symbol "authenticate_user" defined in "src/auth.py"
+    And "src/api.py" calls "authenticate_user"
+    When macro-action "find_change_ripple" is invoked for "authenticate_user"
+    Then the change ripple identifies direct caller "src/api.py"

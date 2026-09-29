@@ -44,3 +44,16 @@ Feature: Conversation state compilation
     Then the rendered state length is under 500 characters
     And the rendered state contains section "**Verified Facts:**"
     And the rendered state contains section "**Goal:**"
+
+  Scenario: Mechanically maintained state links verified facts to concrete observation evidence
+    Given an active canonical state for "Fix parameter parsing"
+    When an evidence-linked fact "parse_params accepts description" is recorded with evidence "obs:83f2"
+    Then the canonical state contains fact "parse_params accepts description"
+    And the fact links to evidence "obs:83f2" with confidence "verified"
+    And the rendered state includes evidence "obs:83f2"
+
+  Scenario: Compacting conversation preserves history snapshots in recoverable checkpoints
+    Given a compiler initialized for "Refactor auth"
+    When 4 messages are compacted into a checkpoint
+    Then a checkpoint handle starting with "ckpt:" is created
+    And the compiler can recover all 4 messages from the checkpoint

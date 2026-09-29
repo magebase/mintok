@@ -105,6 +105,26 @@ DISCIPLINE = {
         "Use investigate_failure or localize_symbol for fast deterministic macro-inspections. "
         "Run the suite tool before finishing. When tests pass, reply with a short summary and no tool call."
     ),
+    "v3_v": (
+        "You are an expert software engineer working in a copy of a repository. "
+        "Solve the task using shell, patch, read, grep, find_files, suite. "
+        "Large outputs are virtualized with an 'obs:<id>' handle. Use expand(handle) if needed."
+    ),
+    "v3_vc": (
+        "You are an expert software engineer working in a copy of a repository. "
+        "Solve the task using shell, patch, read, grep, find_files, suite. "
+        "Large outputs are virtualized with an 'obs:<id>' handle. History is compacted periodically."
+    ),
+    "v3_vcr": (
+        "You are an expert software engineer working in a copy of a repository. "
+        "Solve the task using shell, patch, read, grep, find_files, suite. "
+        "Repository profile is provided. Large outputs are virtualized."
+    ),
+    "v3_vcrm": (
+        "You are an expert software engineer working in a copy of a repository. "
+        "Solve the task using shell, patch, read, grep, find_files, suite and macro-actions "
+        "(investigate_failure, localize_symbol, state_writers, change_ripple)."
+    ),
 }
 
 TOOL_SCHEMAS = {
@@ -380,12 +400,41 @@ TOOL_SCHEMAS = {
             },
         },
         {
+            "name": "state_writers",
+            "description": "Macro-action: find all AST functions/methods writing to attribute across repo.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "attribute": {"type": "string", "description": "attribute name"},
+                },
+                "required": ["attribute"],
+            },
+        },
+        {
+            "name": "change_ripple",
+            "description": "Macro-action: find downstream callers/tests affected by changing a symbol.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "symbol name"},
+                },
+                "required": ["symbol"],
+            },
+        },
+        {
             "name": "suite",
             "description": "Run the task copy's full test suite.",
             "input_schema": {"type": "object", "properties": {}},
         },
     ],
 }
+
+# Base v3 tools without macro-actions:
+_V3_BASE_NAMES = {"shell", "expand", "read", "patch", "grep", "find_files", "slice", "suite"}
+TOOL_SCHEMAS["v3_v"] = [t for t in TOOL_SCHEMAS["v3"] if t["name"] in _V3_BASE_NAMES]
+TOOL_SCHEMAS["v3_vc"] = list(TOOL_SCHEMAS["v3_v"])
+TOOL_SCHEMAS["v3_vcr"] = list(TOOL_SCHEMAS["v3_v"])
+TOOL_SCHEMAS["v3_vcrm"] = list(TOOL_SCHEMAS["v3"])
 
 
 def execute_tool(root: Path, log: Path, policy: str, name: str, args: dict) -> tuple[str, int]:
@@ -450,6 +499,12 @@ def execute_tool(root: Path, log: Path, policy: str, name: str, args: dict) -> t
         elif name == "localize_symbol":
             cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "localize_symbol", str(args["symbol"])]
             stdin = None
+        elif name == "state_writers":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "state_writers", str(args["attribute"])]
+            stdin = None
+        elif name == "change_ripple":
+            cmd = [sys.executable, str(AGENT_CLI), "--root", str(root), "--log", str(log), "--policy", policy, "change_ripple", str(args["symbol"])]
+            stdin = None
         else:
             return f"error: unknown tool {name}", 1
     except (KeyError, TypeError) as err:
@@ -493,16 +548,23 @@ def run_loop(
 
     system = DISCIPLINE[policy]
     tools = TOOL_SCHEMAS[policy]
-    if policy == "v3":
-        from mintok.conversation import StateCompiler
+    has_profile = policy in ("v3", "v3_vcr", "v3_vcrm")
+    has_compiler = policy in ("v3", "v3_vc", "v3_vcr", "v3_vcrm")
+
+    if has_profile:
         from mintok.repo_profile import scan_repo_profile
 
         profile = scan_repo_profile(root)
         profile_header = profile.render_context()
         messages: list[dict] = [{"role": "user", "content": f"{profile_header}\n\nTask:\n{instruction}"}]
-        compiler = StateCompiler(initial_goal=instruction)
     else:
         messages: list[dict] = [{"role": "user", "content": instruction}]
+
+    if has_compiler:
+        from mintok.conversation import StateCompiler
+
+        compiler = StateCompiler(initial_goal=instruction)
+    else:
         compiler = None
     turns = 0
     completed = False
@@ -564,7 +626,7 @@ def run_loop(
                         "role": "user",
                         "content": "[harness] Escalation Level 4 reached: stagnation detected. Unrestricted shell is now unlocked to diagnose, run tests, and fix the issue directly.",
                     })
-        elif policy == "v3":
+        elif policy.startswith("v3"):
             turn_tools = tools
             if compiler is not None and turns >= 4 and turns % 3 == 0 and len(messages) > 4:
                 compiled_view = compiler.state.render()
@@ -642,7 +704,7 @@ def run_loop(
             )
         messages.append({"role": "assistant", "content": blocks})
         messages.append({"role": "user", "content": results})
-        if policy == "v3" and compiler is not None:
+        if compiler is not None:
             for call, res in zip(calls, results):
                 compiler.process_turn(
                     role="tool",
@@ -668,6 +730,29 @@ def run_loop(
         with (log.parent / f"{log.stem}.billing.jsonl").open("w") as fh:
             for row in per_turn:
                 fh.write(json.dumps(row) + "\n")
+
+    # Generate token allocation waterfall profile
+    from mintok.profiler import profile_trajectory_waterfall
+
+    log_events: list[dict] = []
+    if log.is_file():
+        try:
+            with log.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        try:
+                            log_events.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+        except Exception:
+            pass
+    if not log_events and per_turn:
+        log_events = [{"tool": "assistant", "tokens": row.get("output_tokens", 0)} for row in per_turn]
+    waterfall = profile_trajectory_waterfall(log_events)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    (log.parent / f"{log.stem}.waterfall.json").write_text(json.dumps(waterfall.to_dict(), indent=2))
+
     return {"turns": turns, "completed": completed, "usage": usage_total}
 
 

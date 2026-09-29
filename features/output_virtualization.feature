@@ -77,3 +77,11 @@ Feature: Tool-output virtualization and observation store
     Then the expanded output contains 2 lines
     And the expanded output includes "token expired"
     And the expanded output includes "connection refused"
+
+  Scenario: Tracking net observation savings and first-class virtualization metrics
+    Given an observation store
+    When a command "pytest" produces 1200 characters of test failure output
+    And the observation is expanded with filter "FAILED"
+    Then the observation has net positive savings
+    And the observation store metrics report expansion rate greater than 0
+    And the net observation compression ratio is greater than 1.0

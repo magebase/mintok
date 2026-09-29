@@ -239,3 +239,241 @@ class SemanticCoprocessor:
             except Exception:
                 continue
         return callers
+
+    def inspect_test_failure(self, repo_root: Path, failure_text: str) -> EvidencePacket:
+        """Detailed test failure decomposition, frame parsing, and caller bundling."""
+        return self.investigate_failure(repo_root, failure_text)
+
+    def trace_value_origin(self, repo_root: Path, file_path: str, var_name: str) -> dict[str, Any]:
+        """Find AST assignments, parameter bindings, or returns defining var_name."""
+        target_file = (repo_root / file_path).resolve() if not Path(file_path).is_absolute() else Path(file_path)
+        if not target_file.exists():
+            return {"file": file_path, "origins": [], "error": "file not found"}
+
+        code = target_file.read_text(encoding="utf-8", errors="ignore")
+        origins = []
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Assign):
+                    for t in node.targets:
+                        if (isinstance(t, ast.Name) and t.id == var_name) or (isinstance(t, ast.Attribute) and t.attr == var_name):
+                            origins.append({
+                                "line": node.lineno,
+                                "type": "assignment",
+                                "target": getattr(t, "id", getattr(t, "attr", var_name)),
+                            })
+                elif isinstance(node, ast.AnnAssign):
+                    t = node.target
+                    if (isinstance(t, ast.Name) and t.id == var_name) or (isinstance(t, ast.Attribute) and t.attr == var_name):
+                        origins.append({
+                            "line": node.lineno,
+                            "type": "annotated_assignment",
+                            "target": getattr(t, "id", getattr(t, "attr", var_name)),
+                        })
+                elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    for arg in node.args.args:
+                        if arg.arg == var_name:
+                            origins.append({
+                                "line": node.lineno,
+                                "type": "parameter",
+                                "function": node.name,
+                            })
+        except Exception as e:
+            return {"file": file_path, "origins": origins, "error": str(e)}
+
+        return {"file": file_path, "variable": var_name, "origins": origins}
+
+    def find_state_writers(self, repo_root: Path, attr_name: str) -> list[dict[str, Any]]:
+        """Search repository ASTs for assignments mutating attr_name (e.g. self.x = y)."""
+        writers = []
+        for py_file in repo_root.rglob("*.py"):
+            if ".git" in py_file.parts or ".venv" in py_file.parts:
+                continue
+            try:
+                code = py_file.read_text(encoding="utf-8", errors="ignore")
+                if f".{attr_name}" not in code:
+                    continue
+                tree = ast.parse(code)
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Assign):
+                        for t in node.targets:
+                            if isinstance(t, ast.Attribute) and t.attr == attr_name:
+                                rel = str(py_file.relative_to(repo_root))
+                                writers.append({
+                                    "file": rel,
+                                    "line": node.lineno,
+                                    "attribute": attr_name,
+                                })
+            except Exception:
+                continue
+        return writers
+
+    def find_change_ripple(self, repo_root: Path, symbol_name: str) -> dict[str, Any]:
+        """Compute caller graph ripple effect (direct callers + second-order callers)."""
+        direct_callers = self._find_callers(repo_root, symbol_name)
+        ripple_callers: set[str] = set()
+
+        for c_file in direct_callers:
+            c_path = repo_root / c_file
+            if c_path.exists():
+                try:
+                    tree = ast.parse(c_path.read_text(encoding="utf-8", errors="ignore"))
+                    for node in ast.walk(tree):
+                        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                            # Find callers of this enclosing function
+                            second_level = self._find_callers(repo_root, node.name)
+                            for s in second_level:
+                                if s != c_file:
+                                    ripple_callers.add(s)
+                except Exception:
+                    continue
+
+        return {
+            "symbol": symbol_name,
+            "direct_callers": direct_callers,
+            "ripple_callers": sorted(list(ripple_callers)),
+            "impact_count": len(direct_callers) + len(ripple_callers),
+        }
+
+    def discover_test_command(self, repo_root: Path, target_path: str) -> str:
+        """Find the corresponding test file and command for a source file."""
+        stem = Path(target_path).stem
+        candidates = [
+            f"tests/test_{stem}.py",
+            f"test/test_{stem}.py",
+            f"tests/{stem}_test.py",
+            f"tests/acceptance/test_{stem}.py",
+        ]
+        for c in candidates:
+            if (repo_root / c).exists():
+                return f"pytest {c} -q"
+
+        # Search for any test mentioning the stem
+        for p in repo_root.rglob(f"*{stem}*.py"):
+            if "test" in p.name:
+                rel = str(p.relative_to(repo_root))
+                return f"pytest {rel} -q"
+
+        return "pytest -q"
+
+    def analyze_import_failure(self, repo_root: Path, error_message: str) -> dict[str, Any]:
+        """Diagnose import failure and suggest module resolution."""
+        mod_match = re.search(r"No module named '([^']+)'", error_message)
+        name_match = re.search(r"cannot import name '([^']+)' from '([^']+)'", error_message)
+
+        missing_module = mod_match.group(1) if mod_match else ""
+        missing_symbol = name_match.group(1) if name_match else ""
+        from_module = name_match.group(2) if name_match else ""
+
+        suggestions = []
+        if missing_module:
+            rel_candidate = missing_module.replace(".", "/") + ".py"
+            dir_candidate = missing_module.replace(".", "/") + "/__init__.py"
+            for py_file in repo_root.rglob("*.py"):
+                if py_file.name == Path(rel_candidate).name:
+                    suggestions.append(f"found file at {py_file.relative_to(repo_root)}; check PYTHONPATH or package prefix")
+
+        return {
+            "missing_module": missing_module,
+            "missing_symbol": missing_symbol,
+            "from_module": from_module,
+            "suggestions": suggestions,
+        }
+
+    def compare_failure_delta(self, before_output: str, after_output: str) -> dict[str, Any]:
+        """Compare failure signatures between two test runs."""
+        def extract_failures(text: str) -> set[str]:
+            fails = set()
+            for line in text.splitlines():
+                if line.strip().startswith("FAILED "):
+                    fails.add(line.replace("FAILED ", "").split(" - ")[0].strip())
+            return fails
+
+        before_fails = extract_failures(before_output)
+        after_fails = extract_failures(after_output)
+
+        resolved = sorted(list(before_fails - after_fails))
+        regressions = sorted(list(after_fails - before_fails))
+        persistent = sorted(list(before_fails & after_fails))
+
+        return {
+            "resolved": resolved,
+            "regressions": regressions,
+            "persistent": persistent,
+        }
+
+    def verify_public_api(self, repo_root: Path, module_path: str) -> dict[str, Any]:
+        """Verify that symbols listed in __all__ are defined and exported."""
+        target_file = (repo_root / module_path).resolve() if not Path(module_path).is_absolute() else Path(module_path)
+        if not target_file.exists():
+            return {"module": module_path, "valid": False, "error": "file not found"}
+
+        code = target_file.read_text(encoding="utf-8", errors="ignore")
+        defined_symbols = set()
+        exported_symbols = set()
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    defined_symbols.add(node.name)
+                elif isinstance(node, ast.Assign):
+                    for t in node.targets:
+                        if isinstance(t, ast.Name) and t.id == "__all__":
+                            if isinstance(node.value, (ast.List, ast.Tuple)):
+                                for elt in node.value.elts:
+                                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                                        exported_symbols.add(elt.value)
+        except Exception as e:
+            return {"module": module_path, "valid": False, "error": str(e)}
+
+        missing = sorted(list(exported_symbols - defined_symbols))
+        return {
+            "module": module_path,
+            "exported_count": len(exported_symbols),
+            "missing_exports": missing,
+            "valid": len(missing) == 0,
+        }
+
+    def find_similar_fix(self, repo_root: Path, pattern: str) -> list[dict[str, Any]]:
+        """Search existing code for similar exception handling or defensive guards."""
+        matches = []
+        pat = re.compile(rf"\b{re.escape(pattern)}\b")
+        for py_file in repo_root.rglob("*.py"):
+            if ".git" in py_file.parts or ".venv" in py_file.parts:
+                continue
+            try:
+                lines = py_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+                for i, line in enumerate(lines, 1):
+                    if pat.search(line):
+                        rel = str(py_file.relative_to(repo_root))
+                        matches.append({
+                            "file": rel,
+                            "line": i,
+                            "content": line.strip(),
+                        })
+                        if len(matches) >= 5:
+                            return matches
+            except Exception:
+                continue
+        return matches
+
+    def proactive_diagnose_failure(self, repo_root: Path, raw_test_output: str) -> str:
+        """Automatically synthesize failure investigation without frontier turn cost."""
+        lines = [line.strip() for line in raw_test_output.splitlines() if line.strip()]
+        failing_tests = [l.replace("FAILED ", "").split(" - ")[0].strip() for l in lines if l.startswith("FAILED ")]
+        primary = failing_tests[0] if failing_tests else "unknown"
+
+        ev = self.investigate_failure(repo_root, raw_test_output)
+        out_lines = [
+            f"[proactive failure diagnosis]",
+            f"primary failure: {primary}",
+            f"target symbol: {ev.target_symbol} @ {ev.target_file}:{ev.target_line}",
+        ]
+        if ev.callers:
+            out_lines.append(f"callers: {', '.join(ev.callers[:4])}")
+        if ev.slice_excerpt:
+            first_three = "\n".join(ev.slice_excerpt.splitlines()[:3])
+            out_lines.append(f"target slice:\n{first_three}")
+
+        return "\n".join(out_lines)

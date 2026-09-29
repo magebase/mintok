@@ -85,6 +85,9 @@ def when_macro_invoked_for_symbol(ctx, action: str, symbol: str):
     if action == "localize_symbol":
         packet = ctx["coproc"].localize_symbol(ctx["root"], symbol)
         ctx["packet"] = packet
+    elif action == "find_change_ripple":
+        ctx["ripple"] = ctx["coproc"].find_change_ripple(ctx["root"], symbol)
+
 
 
 @when(parsers.parse('a patch modifies internal logic of "{sym_name}" without changing signature'))
@@ -137,3 +140,47 @@ def then_change_type(ctx, change_type: str):
 @then("interface compatibility is preserved")
 def then_interface_preserved(ctx):
     assert ctx["assessment"].interface_compatible is True
+
+
+@given(parsers.parse('a Python repository with attribute assignment "{code}" in "{fpath}"'), target_fixture="ctx")
+def given_repo_with_attr(tmp_path: Path, code: str, fpath: str):
+    root = tmp_path / "repo_attr"
+    root.mkdir()
+    p = root / fpath
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"class Model:\n    def update(self):\n        {code}\n", encoding="utf-8")
+    coproc = SemanticCoprocessor(repo_root=root)
+    return {"root": root, "coproc": coproc, "fpath": fpath}
+
+
+@when(parsers.parse('macro-action "{action}" is invoked for attribute "{attr}"'))
+def when_macro_invoked_attr(ctx, action: str, attr: str):
+    writers = ctx["coproc"].find_state_writers(ctx["root"], attr)
+    ctx["writers"] = writers
+
+
+@then(parsers.parse('the state writers list includes "{fpath}"'))
+def then_writers_include(ctx, fpath: str):
+    assert any(w["file"] == fpath for w in ctx["writers"])
+
+
+@when("proactive failure diagnosis is automatically performed")
+def when_proactive_diagnosis(ctx):
+    diag = ctx["coproc"].proactive_diagnose_failure(ctx["root"], ctx["traceback"])
+    ctx["diagnostic"] = diag
+
+
+@then(parsers.parse('the diagnostic identifies target symbol "{symbol}"'))
+def then_diag_identifies_symbol(ctx, symbol: str):
+    assert symbol in ctx["diagnostic"]
+
+
+@then(parsers.parse('the diagnostic identifies target file "{fpath}"'))
+def then_diag_identifies_file(ctx, fpath: str):
+    assert fpath in ctx["diagnostic"]
+
+
+@then(parsers.parse('the change ripple identifies direct caller "{caller}"'))
+def then_ripple_identifies_caller(ctx, caller: str):
+    assert caller in ctx["ripple"]["direct_callers"]
+

@@ -38,6 +38,14 @@ class ObservationStore:
         self._by_id: dict[str, Observation] = {}
         self._last_by_cmd: dict[str, str] = {}
         self._content_to_id: dict[str, str] = {}
+        self._digest_tokens: dict[str, int] = {}
+        self._expansions: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    def record_digest(self, obs_id: str, tokens: int) -> None:
+        """Record the token cost of the virtualized summary emitted to context."""
+        if not obs_id.startswith("obs:"):
+            obs_id = f"obs:{obs_id}"
+        self._digest_tokens[obs_id] = tokens
 
     def store(
         self,
@@ -94,7 +102,79 @@ class ObservationStore:
         total_matching = len(lines)
         sliced = lines[start_line : start_line + max_lines]
         header = f"[{obs.id} expanded: {len(sliced)}/{total_matching} lines]"
-        return header + "\n" + "\n".join(sliced)
+        result_text = header + "\n" + "\n".join(sliced)
+
+        # Track expansion tokens
+        recovered = estimate_tokens(result_text)
+        self._expansions[obs.id].append({
+            "filter": filter_str,
+            "start_line": start_line,
+            "max_lines": max_lines,
+            "tokens": recovered,
+        })
+        return result_text
+
+    def observation_savings(self, obs_id: str) -> dict[str, Any]:
+        """Compute NetSavings = raw - digest - recovery for an observation."""
+        obs = self.get(obs_id)
+        if not obs:
+            return {}
+        raw = obs.tokens
+        digest = self._digest_tokens.get(obs.id, 0)
+        expansions = self._expansions.get(obs.id, [])
+        recovered = sum(e["tokens"] for e in expansions)
+        count = len(expansions)
+        net_savings = raw - digest - recovered
+        return {
+            "obs_id": obs.id,
+            "raw_tokens": raw,
+            "digest_tokens": digest,
+            "later_expansion_tokens": recovered,
+            "number_of_expansions": count,
+            "net_savings": net_savings,
+        }
+
+    def metrics(self) -> dict[str, Any]:
+        """Compute first-class observation metrics across all stored observations."""
+        total_obs = len(self._by_id)
+        if total_obs == 0:
+            return {
+                "total_observations": 0,
+                "total_raw_tokens": 0,
+                "total_digest_tokens": 0,
+                "total_recovered_tokens": 0,
+                "total_net_savings": 0,
+                "observation_compression_ratio": 1.0,
+                "net_observation_compression_ratio": 1.0,
+                "expansion_rate": 0.0,
+                "multi_expansion_rate": 0.0,
+                "tokens_recovered_after_compression": 0,
+            }
+        total_raw = sum(obs.tokens for obs in self._by_id.values())
+        total_digest = sum(self._digest_tokens.get(obs.id, 0) for obs in self._by_id.values())
+        total_recovered = sum(
+            sum(e["tokens"] for e in self._expansions.get(obs.id, []))
+            for obs in self._by_id.values()
+        )
+        expanded_obs_count = sum(1 for obs_id in self._by_id if len(self._expansions.get(obs_id, [])) > 0)
+        multi_expanded_obs_count = sum(1 for obs_id in self._by_id if len(self._expansions.get(obs_id, [])) > 1)
+
+        total_net = total_raw - total_digest - total_recovered
+        gross_ratio = total_raw / max(1, total_digest)
+        net_ratio = total_raw / max(1, total_digest + total_recovered)
+
+        return {
+            "total_observations": total_obs,
+            "total_raw_tokens": total_raw,
+            "total_digest_tokens": total_digest,
+            "total_recovered_tokens": total_recovered,
+            "total_net_savings": total_net,
+            "observation_compression_ratio": gross_ratio,
+            "net_observation_compression_ratio": net_ratio,
+            "expansion_rate": expanded_obs_count / total_obs,
+            "multi_expansion_rate": multi_expanded_obs_count / total_obs,
+            "tokens_recovered_after_compression": total_recovered,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -303,4 +383,5 @@ class ToolOutputVirtualizer:
 
         obs = self.store.store(cmd_str, raw_str, metadata=meta)
         result = f"{summary}\nfull output → {obs.id}"
+        self.store.record_digest(obs.id, estimate_tokens(result))
         return result, obs

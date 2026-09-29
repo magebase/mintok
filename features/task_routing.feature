@@ -75,3 +75,10 @@ Feature: Deterministic pre-flight task router
     And target files: "src/shopcart/calc.py"=50
     When the task "utility-task-01" is routed with actual outcomes control=2000/solved and semantic-C=1000/solved
     Then the utility for "semantic-C" is higher than "control"
+
+  Scenario: Pre-flight routing computes policy expectations and expected utility
+    Given an instruction "Add a tip_cents keyword parameter (default 0) to compute_total in src/shopcart/pricing.py"
+    And target files: "src/shopcart/pricing.py"=118
+    When the task is routed
+    Then the expected utility is greater than 0.8
+    And the decision includes policy expectation for "semantic-C" with success probability above 0.9

@@ -40,6 +40,12 @@ Feature: Inference profiler
     And estimated avoidable is "$5.00"
     And the potential improvement is unbounded
 
+  Scenario: Token waterfall breakdown and oracle minimum amplification
+    Given a trajectory with events: instructions 500, task 200, source 1500, digests 300, verification 400
+    When the token waterfall is computed
+    Then the waterfall total is 2900 tokens
+    And the oracle minimum of 1000 tokens yields amplification factor 2.9
+
   @integration
   Scenario: The CLI profiles a session JSONL file
     Given a session JSONL file with $84.20 total spend

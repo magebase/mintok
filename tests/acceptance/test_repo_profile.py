@@ -137,3 +137,25 @@ def then_context_contains(ctx, substr: str):
 @then("the reloaded profile matches the original profile")
 def then_reloaded_matches(ctx):
     assert ctx["reloaded"].to_dict() == ctx["profile"].to_dict()
+
+
+@when(parsers.parse('historical associations are recorded for test "{test}" and symbol "{symbol}"'))
+def when_record_test_symbol(ctx, test: str, symbol: str):
+    ctx["profile"].record_test_symbol(test, symbol)
+
+
+@when(parsers.parse('a co-change is recorded between "{f1}" and "{f2}"'))
+def when_record_co_change(ctx, f1: str, f2: str):
+    ctx["profile"].record_co_change(f1, f2)
+
+
+@then(parsers.parse('the profile associates "{test}" with symbol "{symbol}"'))
+def then_associates_test_symbol(ctx, test: str, symbol: str):
+    assert symbol in ctx["profile"].test_symbol_map[test]
+
+
+@then(parsers.parse('the co-change graph connects "{f1}" and "{f2}"'))
+def then_co_change_connects(ctx, f1: str, f2: str):
+    assert f2 in ctx["profile"].co_change_graph[f1]
+    assert f1 in ctx["profile"].co_change_graph[f2]
+

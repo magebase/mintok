@@ -99,3 +99,16 @@ def record_has_actual(ctx: SimpleNamespace) -> None:
 def utility_higher(ctx: SimpleNamespace, backend1: str, backend2: str) -> None:
     assert ctx.record["utilities"][backend1] > ctx.record["utilities"][backend2], ctx.record["utilities"]
 
+
+@then(parsers.re(r"the expected utility is greater than (?P<val>[\d.]+)"))
+def expected_utility_greater(ctx: SimpleNamespace, val: str):
+    assert ctx.decision.expected_utility > float(val)
+
+
+@then(parsers.re(r'the decision includes policy expectation for "(?P<policy>[^"]+)" with success probability above (?P<prob>[\d.]+)'))
+def policy_expectation_check(ctx: SimpleNamespace, policy: str, prob: str):
+    assert policy in ctx.decision.policy_expectations
+    exp = ctx.decision.policy_expectations[policy]
+    assert exp.p_success > float(prob)
+
+

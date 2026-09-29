@@ -130,3 +130,42 @@ def formula_cache() -> None:
 @given("a session JSONL file with $84.20 total spend")
 def session_file(ctx: SimpleNamespace, repo: Path) -> None:
     dump_sessions_jsonl(_sample_sessions(), repo / "sessions.jsonl")
+
+
+@given(parsers.parse('a trajectory with events: instructions {inst:d}, task {task:d}, source {src:d}, digests {dig:d}, verification {ver:d}'))
+def given_trajectory_events(ctx: SimpleNamespace, inst: int, task: int, src: int, dig: int, ver: int):
+    ctx.events = [
+        {"tool": "instruction", "tokens": inst},
+        {"tool": "task", "tokens": task},
+        {"tool": "read", "tokens": src},
+        {"tool": "shell", "output": "obs:1234", "tokens": dig},
+        {"tool": "suite", "tokens": ver},
+    ]
+
+
+@when("the token waterfall is computed")
+def when_waterfall_computed(ctx: SimpleNamespace):
+    from mintok.profiler import profile_trajectory_waterfall
+    ctx.waterfall = profile_trajectory_waterfall(ctx.events)
+
+
+@then(parsers.parse("the waterfall total is {total:d} tokens"))
+def then_waterfall_total(ctx: SimpleNamespace, total: int):
+    assert ctx.waterfall.total == total
+
+
+@then(parsers.parse("the oracle minimum of {min_tok:d} tokens yields amplification factor {amp:f}"))
+def then_oracle_minimum_amp(ctx: SimpleNamespace, min_tok: int, amp: float):
+    from mintok.profiler import OracleMinimum
+    oracle = OracleMinimum(
+        task_id="t1",
+        task_tokens=200,
+        decisive_source_tokens=400,
+        decisive_failure_tokens=100,
+        patch_tokens=100,
+        verification_tokens=200,
+    )
+    assert oracle.minimum_tokens == min_tok
+    actual_amp = oracle.amplification_factor(ctx.waterfall.total)
+    assert round(actual_amp, 1) == round(amp, 1)
+

@@ -31,3 +31,15 @@ Feature: MinTok 3.0 runtime inference optimizer
     When the agent CLI executes macro "investigate_failure" on "calc.py:3" under policy "v3"
     Then the agent CLI exit code is 0
     And the agent CLI output includes "[evidence packet: calculate"
+
+  Scenario: Six-arm ablation ladder gates tools according to configuration
+    Given an empty trajectory log "v3_ablation.jsonl"
+    And a repository with a failing function "calculate" in "calc.py"
+    When the agent CLI executes tool "shell" with args "echo 'test ablation'" under policy "v3_v"
+    Then the agent CLI exit code is 0
+    When the agent CLI executes tool "localize_symbol" with args "calculate" under policy "v3_v"
+    Then the agent CLI exit code is 3
+    And the agent CLI output includes "locked: tool 'localize_symbol' not in policy v3_v"
+    When the agent CLI executes tool "localize_symbol" with args "calculate" under policy "v3_vcrm"
+    Then the agent CLI exit code is 0
+    And the agent CLI output includes "[symbol packet: calculate"

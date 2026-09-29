@@ -158,8 +158,50 @@ POLICIES: dict[str, dict] = {
         "breaker": False,
         "escalation": True,
     },
+    # v3 ablation ladder:
+    # v3_v: output virtualization only
+    "v3_v": {
+        "tools": {"shell", "patch", "read", "suite", "expand", "grep", "find_files", "slice"},
+        "ops": set(),
+        "breaker": False,
+        "virtual_output": True,
+    },
+    # v3_vc: virtualization + conversation compilation
+    "v3_vc": {
+        "tools": {"shell", "patch", "read", "suite", "expand", "grep", "find_files", "slice"},
+        "ops": set(),
+        "breaker": False,
+        "virtual_output": True,
+    },
+    # v3_vcr: v3_vc + repo profile
+    "v3_vcr": {
+        "tools": {"shell", "patch", "read", "suite", "expand", "grep", "find_files", "slice"},
+        "ops": set(),
+        "breaker": False,
+        "virtual_output": True,
+    },
+    # v3_vcrm: v3_vcr + macro-actions
+    "v3_vcrm": {
+        "tools": {
+            "shell",
+            "patch",
+            "read",
+            "suite",
+            "expand",
+            "grep",
+            "find_files",
+            "slice",
+            "investigate_failure",
+            "localize_symbol",
+            "state_writers",
+            "change_ripple",
+        },
+        "ops": set(),
+        "breaker": False,
+        "virtual_output": True,
+    },
     # v3: MinTok 3.0 runtime inference optimizer. Unrestricted execution
-    # with tool-output virtualization and macro-actions.
+    # with tool-output virtualization, macro-actions, and proactive diagnosis.
     "v3": {
         "tools": {
             "shell",
@@ -172,10 +214,13 @@ POLICIES: dict[str, dict] = {
             "slice",
             "investigate_failure",
             "localize_symbol",
+            "state_writers",
+            "change_ripple",
         },
         "ops": set(),
         "breaker": False,
         "virtual_output": True,
+        "proactive_diagnosis": True,
     },
 }
 
@@ -322,6 +367,12 @@ def main(argv: list[str] | None = None) -> int:
     loc = sub.add_parser("localize_symbol", help="macro-action: bundle definition and callers (arm v3)")
     loc.add_argument("symbol", help="symbol name")
 
+    sw = sub.add_parser("state_writers", help="macro-action: locate attribute mutations across modules (arm v3)")
+    sw.add_argument("attribute", help="attribute name")
+
+    cr = sub.add_parser("change_ripple", help="macro-action: compute caller impact ripple (arm v3)")
+    cr.add_argument("symbol", help="symbol name")
+
     args = parser.parse_args(argv)
     policy = POLICIES.get(args.policy)
     if policy is None:
@@ -357,6 +408,15 @@ def main(argv: list[str] | None = None) -> int:
                     "id": obs.id, "command": obs.command, "content": obs.content,
                     "tokens": obs.tokens, "created_at": obs.created_at, "metadata": obs.metadata
                 }))
+            if policy.get("proactive_diagnosis") and exit_code != 0 and ("FAIL" in output or "ERROR" in output):
+                try:
+                    from mintok.coprocessor import SemanticCoprocessor
+                    coproc = SemanticCoprocessor(repo_root=args.root)
+                    diag = coproc.proactive_diagnose_failure(args.root, output)
+                    if diag:
+                        output = f"{output}\n\n{diag}"
+                except Exception:
+                    pass
         entry["output"] = output
         entry["exit_code"] = exit_code
         if extra:
@@ -783,6 +843,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.tool == "investigate_failure":
         entry["args"] = args.traceback
+        if not gated("investigate_failure"):
+            return finish(f"locked: tool 'investigate_failure' not in policy {args.policy}", 3)
         from mintok.coprocessor import SemanticCoprocessor
         coproc = SemanticCoprocessor(args.root)
         tb = args.traceback
@@ -802,10 +864,41 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.tool == "localize_symbol":
         entry["args"] = args.symbol
+        if not gated("localize_symbol"):
+            return finish(f"locked: tool 'localize_symbol' not in policy {args.policy}", 3)
         from mintok.coprocessor import SemanticCoprocessor
         coproc = SemanticCoprocessor(args.root)
         pkt = coproc.localize_symbol(args.root, args.symbol)
         return finish(pkt.render(), 0)
+
+    if args.tool == "state_writers":
+        entry["args"] = args.attribute
+        if not gated("state_writers"):
+            return finish(f"locked: tool 'state_writers' not in policy {args.policy}", 3)
+        from mintok.coprocessor import SemanticCoprocessor
+        coproc = SemanticCoprocessor(args.root)
+        writers = coproc.find_state_writers(args.root, args.attribute)
+        lines = [f"[state writers for attribute: {args.attribute}]"]
+        for w in writers[:10]:
+            lines.append(f"  {w['file']}:{w['line']}")
+        if not writers:
+            lines.append("  (no direct attribute mutations found)")
+        return finish("\n".join(lines), 0)
+
+    if args.tool == "change_ripple":
+        entry["args"] = args.symbol
+        if not gated("change_ripple"):
+            return finish(f"locked: tool 'change_ripple' not in policy {args.policy}", 3)
+        from mintok.coprocessor import SemanticCoprocessor
+        coproc = SemanticCoprocessor(args.root)
+        res = coproc.find_change_ripple(args.root, args.symbol)
+        lines = [
+            f"[change ripple for symbol: {args.symbol}]",
+            f"direct callers ({len(res['direct_callers'])}): {', '.join(res['direct_callers'][:5])}",
+            f"ripple callers ({len(res['ripple_callers'])}): {', '.join(res['ripple_callers'][:5])}",
+            f"impact score: {res['impact_count']}",
+        ]
+        return finish("\n".join(lines), 0)
 
     return 2
 

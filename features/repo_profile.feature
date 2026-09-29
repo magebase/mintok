@@ -51,3 +51,10 @@ Feature: Repository execution profiles and complexity priors
     Given a repository profile for "msrest"
     When the profile is serialized to JSON and reloaded
     Then the reloaded profile matches the original profile
+
+  Scenario: Durable knowledge accumulation across multiple tasks
+    Given a repository profile for "azure-cli"
+    When historical associations are recorded for test "tests/test_auth.py" and symbol "authenticate"
+    And a co-change is recorded between "azure/cli/auth.py" and "azure/cli/session.py"
+    Then the profile associates "tests/test_auth.py" with symbol "authenticate"
+    And the co-change graph connects "azure/cli/auth.py" and "azure/cli/session.py"

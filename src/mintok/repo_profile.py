@@ -28,6 +28,13 @@ class RepoProfile:
     key_directories: list[str] = field(default_factory=list)
     complexity_score: float = 0.0
     recommended_strategy: str = "compressed-first"
+    build_commands: list[str] = field(default_factory=list)
+    workspace_topology: dict[str, list[str]] = field(default_factory=dict)
+    generated_directories: list[str] = field(default_factory=list)
+    ci_conventions: list[str] = field(default_factory=list)
+    test_symbol_map: dict[str, list[str]] = field(default_factory=dict)
+    co_change_graph: dict[str, list[str]] = field(default_factory=dict)
+    failure_modes: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
 
     def render_context(self) -> str:
@@ -41,13 +48,56 @@ class RepoProfile:
             f"key_directories: {', '.join(self.key_directories[:6])}",
             f"complexity: {self.complexity_score:.2f} (strategy: {self.recommended_strategy})",
         ]
+        if self.build_commands:
+            lines.append(f"build_command: {self.build_commands[0]}")
         return "\n".join(lines)
+
+    def record_test_symbol(self, test: str, symbol: str) -> None:
+        """Associate a test with a tested symbol."""
+        if test not in self.test_symbol_map:
+            self.test_symbol_map[test] = []
+        if symbol not in self.test_symbol_map[test]:
+            self.test_symbol_map[test].append(symbol)
+
+    def record_co_change(self, file_a: str, file_b: str) -> None:
+        """Record historical co-change relationship between two files."""
+        if file_a not in self.co_change_graph:
+            self.co_change_graph[file_a] = []
+        if file_b not in self.co_change_graph[file_a]:
+            self.co_change_graph[file_a].append(file_b)
+
+        if file_b not in self.co_change_graph:
+            self.co_change_graph[file_b] = []
+        if file_a not in self.co_change_graph[file_b]:
+            self.co_change_graph[file_b].append(file_a)
+
+    def record_failure_mode(self, signature: str, note: str) -> None:
+        """Record a recurring failure signature and its resolution note."""
+        self.failure_modes.append({
+            "signature": signature,
+            "note": note,
+            "recorded_at": Path(__file__).stat().st_mtime,
+        })
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RepoProfile:
+        # Handle backward compatibility for any missing fields
+        defaults = {
+            "build_commands": [],
+            "workspace_topology": {},
+            "generated_directories": [],
+            "ci_conventions": [],
+            "test_symbol_map": {},
+            "co_change_graph": {},
+            "failure_modes": [],
+            "metrics": {},
+        }
+        for k, v in defaults.items():
+            if k not in data:
+                data[k] = v
         return cls(**data)
 
     def save(self, path: Path) -> None:
@@ -58,6 +108,24 @@ class RepoProfile:
     def load(cls, path: Path) -> RepoProfile:
         data = json.loads(path.read_text(encoding="utf-8"))
         return cls.from_dict(data)
+
+
+def get_or_create_repo_profile(root: Path, cache_dir: Path | None = None) -> RepoProfile:
+    """Retrieve durable cached profile for a repository or scan and cache it."""
+    cache_base = cache_dir or (root / ".mintok")
+    profile_file = cache_base / "profile.json"
+    if profile_file.exists():
+        try:
+            return RepoProfile.load(profile_file)
+        except Exception:
+            pass
+
+    profile = scan_repo_profile(root)
+    try:
+        profile.save(profile_file)
+    except Exception:
+        pass
+    return profile
 
 
 def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
@@ -122,6 +190,31 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
 
     strategy = "virtualized-shell" if (complexity >= 0.50 or package_count >= 4 or max_depth >= 5) else "compressed-first"
 
+    build_cmds = []
+    if "pyproject.toml" in rel_files_str:
+        build_cmds.append("pip install -e .")
+    elif "setup.py" in rel_files_str:
+        build_cmds.append("python setup.py build")
+    elif "Makefile" in rel_files_str:
+        build_cmds.append("make")
+
+    generated_dirs = [d for d in dirs if any(d == g or d.endswith(f"/{g}") for g in ("build", "dist", ".tox", "target"))]
+
+    ci = []
+    if any(".github" in d for d in dirs):
+        ci.append("github-actions")
+    if any(".circleci" in d for d in dirs):
+        ci.append("circleci")
+    if "tox.ini" in rel_files_str:
+        ci.append("tox")
+
+    topology: dict[str, list[str]] = {}
+    for pkg in packages:
+        top = pkg.split(".")[0]
+        if top not in topology:
+            topology[top] = []
+        topology[top].append(pkg)
+
     metrics = {
         "file_count": file_count,
         "package_count": package_count,
@@ -138,5 +231,9 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
         key_directories=key_dirs,
         complexity_score=complexity,
         recommended_strategy=strategy,
+        build_commands=build_cmds,
+        workspace_topology=topology,
+        generated_directories=generated_dirs,
+        ci_conventions=ci,
         metrics=metrics,
     )

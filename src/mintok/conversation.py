@@ -1,32 +1,69 @@
-"""Conversation state compilation for MinTok 3.0.
+"""Conversation state compilation for MinTok 3.0 / 3.1.
 
 Compiles verbose multi-turn agent conversation history into a compact,
 structured canonical working state. Discards intermediate conversational
-prose and tool outputs while retaining critical verified facts, hypotheses,
-patch states, and failure signatures.
+prose and tool outputs while mechanically maintaining verified facts
+linked to evidence, known symbols, patch states, test outcomes, and
+recoverable conversation checkpoints.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
-from dataclasses import dataclass, field
+import time
+from dataclasses import asdict, dataclass, field
 from typing import Any
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceFact:
+    """An immutable, evidence-linked verified fact."""
+
+    id: str
+    value: str
+    evidence: str
+    confidence: str = "verified"
+
+    def render(self) -> str:
+        return f"{self.id}: {self.value} (evidence: {self.evidence}, confidence: {self.confidence})"
+
+
+@dataclass(frozen=True, slots=True)
+class StateCheckpoint:
+    """A durable, content-addressable snapshot of conversation messages."""
+
+    id: str
+    version: int
+    turn_index: int
+    messages: list[dict[str, Any]]
+    created_at: float
 
 
 @dataclass
 class CanonicalState:
-    """Canonical, structured state of an agent's problem-solving progress."""
+    """Canonical, mechanically maintained state of an agent's problem-solving progress."""
 
     goal: str
-    verified_facts: list[str] = field(default_factory=list)
+    verified_facts: list[EvidenceFact | str] = field(default_factory=list)
     active_hypothesis: str | None = None
     rejected_hypotheses: list[str] = field(default_factory=list)
     known_files: list[str] = field(default_factory=list)
     known_symbols: list[str] = field(default_factory=list)
     current_patch: str | None = None
+    test_outcomes: dict[str, str] = field(default_factory=dict)
     current_failures: list[str] = field(default_factory=list)
+    checkpoints: list[str] = field(default_factory=list)
     next_action: str | None = None
     version: int = 1
+
+    def add_fact(self, value: str, evidence: str, confidence: str = "verified") -> EvidenceFact:
+        """Add an evidence-linked fact to the state."""
+        fact_id = f"F{len(self.verified_facts) + 1}"
+        fact = EvidenceFact(id=fact_id, value=value, evidence=evidence, confidence=confidence)
+        self.verified_facts.append(fact)
+        return fact
 
     def record_file(self, path: str) -> None:
         if path and path not in self.known_files:
@@ -40,21 +77,35 @@ class CanonicalState:
         if failure and failure not in self.current_failures:
             self.current_failures.append(failure)
 
+    def record_test_outcome(self, test: str, passed: bool, evidence: str | None = None) -> None:
+        status = "passed" if passed else "failed"
+        self.test_outcomes[test] = status
+        if not passed:
+            self.record_failure(test)
+        elif test in self.current_failures:
+            self.current_failures.remove(test)
+
     def set_hypothesis(self, hypothesis: str) -> None:
         self.active_hypothesis = hypothesis.strip()
 
-    def reject_hypothesis(self, reason: str | None = None) -> None:
+    def reject_hypothesis(self, reason: str | None = None, evidence: str | None = None) -> None:
         if self.active_hypothesis:
             entry = self.active_hypothesis
+            details = []
             if reason:
-                entry += f" (rejected: {reason})"
+                details.append(f"reason: {reason}")
+            if evidence:
+                details.append(f"evidence: {evidence}")
+            if details:
+                entry += f" (rejected: {', '.join(details)})"
             if entry not in self.rejected_hypotheses:
                 self.rejected_hypotheses.append(entry)
             self.active_hypothesis = None
 
-    def verify_hypothesis(self, fact: str) -> None:
-        if fact and fact not in self.verified_facts:
-            self.verified_facts.append(fact)
+    def verify_hypothesis(self, fact: str, evidence: str = "test-pass") -> None:
+        if fact and fact not in [getattr(f, "value", f) for f in self.verified_facts]:
+            fact_id = f"F{len(self.verified_facts) + 1}"
+            self.verified_facts.append(EvidenceFact(id=fact_id, value=fact, evidence=evidence, confidence="verified"))
         self.active_hypothesis = None
 
     def clear_failures(self) -> None:
@@ -70,7 +121,10 @@ class CanonicalState:
         if self.verified_facts:
             lines.append("**Verified Facts:**")
             for f in self.verified_facts:
-                lines.append(f"- {f}")
+                if isinstance(f, EvidenceFact):
+                    lines.append(f"- {f.render()}")
+                else:
+                    lines.append(f"- {f}")
 
         if self.active_hypothesis:
             lines.append(f"**Active Hypothesis:** {self.active_hypothesis}")
@@ -96,6 +150,9 @@ class CanonicalState:
             for fl in self.current_failures:
                 lines.append(f"- {fl}")
 
+        if self.checkpoints:
+            lines.append(f"**History Checkpoints:** {', '.join(self.checkpoints[-3:])} (recoverable)")
+
         if self.next_action:
             lines.append(f"**Next Action:** {self.next_action}")
 
@@ -110,6 +167,29 @@ class StateCompiler:
 
     def __init__(self, initial_goal: str) -> None:
         self.state = CanonicalState(goal=initial_goal)
+        self._checkpoints: dict[str, StateCheckpoint] = {}
+
+    def checkpoint(self, messages: list[dict[str, Any]], turn_index: int = 0) -> str:
+        """Create a recoverable checkpoint of the current message history."""
+        payload = json.dumps(messages, sort_keys=True)
+        h = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8]
+        ckpt_id = f"ckpt:{h}"
+        ckpt = StateCheckpoint(
+            id=ckpt_id,
+            version=self.state.version,
+            turn_index=turn_index,
+            messages=list(messages),
+            created_at=time.time(),
+        )
+        self._checkpoints[ckpt_id] = ckpt
+        if ckpt_id not in self.state.checkpoints:
+            self.state.checkpoints.append(ckpt_id)
+        return ckpt_id
+
+    def get_checkpoint(self, ckpt_id: str) -> StateCheckpoint | None:
+        if not ckpt_id.startswith("ckpt:"):
+            ckpt_id = f"ckpt:{ckpt_id}"
+        return self._checkpoints.get(ckpt_id)
 
     def process_turn(
         self,
@@ -161,3 +241,4 @@ class StateCompiler:
             self.state.current_patch = f"applied patch on {tool_args}"
 
         return self.state
+

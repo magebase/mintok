@@ -147,7 +147,7 @@ def then_active_hyp_cleared(ctx):
 
 @then(parsers.parse('the verified facts include "{fact}"'))
 def then_verified_facts_include(ctx, fact: str):
-    assert fact in ctx["state"].verified_facts
+    assert any(fact == getattr(f, "value", f) for f in ctx["state"].verified_facts)
 
 
 @then("the current failures list is empty")
@@ -168,3 +168,55 @@ def then_rendered_len_under(ctx, max_chars: int):
 @then(parsers.parse('the rendered state contains section "{section}"'))
 def then_rendered_contains_section(ctx, section: str):
     assert section in ctx["rendered"]
+
+
+@given(parsers.parse('a compiler initialized for "{goal}"'), target_fixture="ctx")
+def given_compiler_for_goal(goal: str):
+    compiler = StateCompiler(initial_goal=goal)
+    return {"compiler": compiler, "state": compiler.state}
+
+
+@when(parsers.parse('an evidence-linked fact "{fact}" is recorded with evidence "{evidence}"'))
+def when_fact_recorded_with_evidence(ctx, fact: str, evidence: str):
+    ef = ctx["state"].add_fact(value=fact, evidence=evidence, confidence="verified")
+    ctx["last_fact"] = ef
+
+
+@then(parsers.parse('the canonical state contains fact "{fact}"'))
+def then_state_contains_fact(ctx, fact: str):
+    assert any(fact == getattr(f, "value", f) for f in ctx["state"].verified_facts)
+
+
+@then(parsers.parse('the fact links to evidence "{evidence}" with confidence "{confidence}"'))
+def then_fact_links_evidence(ctx, evidence: str, confidence: str):
+    ef = ctx["last_fact"]
+    assert ef.evidence == evidence
+    assert ef.confidence == confidence
+
+
+@then(parsers.parse('the rendered state includes evidence "{evidence}"'))
+def then_rendered_includes_evidence(ctx, evidence: str):
+    rendered = ctx["state"].render()
+    assert evidence in rendered
+
+
+@when(parsers.parse('{count:d} messages are compacted into a checkpoint'))
+def when_messages_compacted(ctx, count: int):
+    msgs = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"} for i in range(count)]
+    ctx["original_msgs"] = msgs
+    ckpt_id = ctx["compiler"].checkpoint(msgs, turn_index=count)
+    ctx["ckpt_id"] = ckpt_id
+
+
+@then(parsers.parse('a checkpoint handle starting with "{prefix}" is created'))
+def then_checkpoint_handle_created(ctx, prefix: str):
+    assert ctx["ckpt_id"].startswith(prefix)
+    assert ctx["ckpt_id"] in ctx["state"].checkpoints
+
+
+@then(parsers.parse('the compiler can recover all {count:d} messages from the checkpoint'))
+def then_compiler_can_recover(ctx, count: int):
+    ckpt = ctx["compiler"].get_checkpoint(ctx["ckpt_id"])
+    assert ckpt is not None
+    assert len(ckpt.messages) == count
+    assert ckpt.messages == ctx["original_msgs"]

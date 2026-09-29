@@ -160,3 +160,41 @@ def then_expanded_line_count(ctx, count: int):
 @then(parsers.parse('the expanded output includes "{substr}"'))
 def then_expanded_includes(ctx, substr: str):
     assert substr in ctx["expanded"]
+
+
+@when(parsers.parse('a command "{cmd}" produces {length:d} characters of test failure output'))
+def when_cmd_failure_output(ctx, cmd: str, length: int):
+    raw = (
+        "=================== FAILURES ===================\n"
+        "FAILED tests/test_core.py::test_alpha - AssertionError\n"
+        + ("extra context line ...\n" * (length // 30))
+        + "FAILED tests/test_core.py::test_beta - KeyError\n"
+    )
+    res, obs = ctx["virtualizer"].virtualize(cmd, raw, exit_code=1)
+    ctx["result"] = res
+    ctx["obs"] = obs
+    ctx["raw"] = raw
+    ctx["cmd"] = cmd
+
+
+@then("the observation has net positive savings")
+def then_has_net_positive_savings(ctx):
+    savings = ctx["store"].observation_savings(ctx["obs"].id)
+    assert savings["net_savings"] > 0
+    assert savings["number_of_expansions"] >= 1
+    assert savings["later_expansion_tokens"] > 0
+
+
+@then(parsers.re(r"the observation store metrics report expansion rate greater than (?P<val>[\d.]+)"))
+def then_metrics_expansion_rate(ctx, val: str):
+    metrics = ctx["store"].metrics()
+    assert metrics["expansion_rate"] > float(val)
+    assert metrics["total_observations"] >= 1
+
+
+@then(parsers.re(r"the net observation compression ratio is greater than (?P<val>[\d.]+)"))
+def then_metrics_net_compression(ctx, val: str):
+    metrics = ctx["store"].metrics()
+    assert metrics["net_observation_compression_ratio"] > float(val)
+
+
