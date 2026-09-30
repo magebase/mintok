@@ -97,6 +97,21 @@ def build_parser() -> argparse.ArgumentParser:
     insp = sub.add_parser("inspect-run", help="inspect trajectory economic trace, waste taxes, and elimination")
     insp.add_argument("run_file", type=Path, help="path to trajectory or benchmark run JSON/JSONL")
     insp.add_argument("--format", choices=("text", "json"), default="text")
+
+    dev = sub.add_parser("dev-eval", help="run multi-stage local development evaluation gate (Stages 0-2 + Catastrophe)")
+    dev.add_argument("root", type=Path, nargs="?", default=Path("."))
+    dev.add_argument("--format", choices=("text", "json"), default="text")
+
+    cand = sub.add_parser("candidate-eval", help="evaluate candidate against champion across FAST-12 window")
+    cand.add_argument("--candidate", type=Path, default=None, help="candidate runs JSON/JSONL")
+    cand.add_argument("--champion", type=Path, default=None, help="champion runs JSON/JSONL")
+    cand.add_argument("--format", choices=("text", "json"), default="text")
+
+    cat = sub.add_parser("catastrophe", help="run 10-case catastrophe regression suite")
+    cat.add_argument("--format", choices=("text", "json"), default="text")
+
+    mech = sub.add_parser("mechanism-bench", help="run isolated mechanism benchmarks and next-action invariance")
+    mech.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
@@ -235,6 +250,59 @@ def main(argv: list[str] | None = None) -> int:
         from mintok.inspector import inspect_run
 
         report = inspect_run(args.run_file)
+        if args.format == "json":
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.render_text())
+        return 0
+
+    if args.command == "dev-eval":
+        from mintok.promotion_funnel import run_dev_eval
+
+        report = run_dev_eval(repo_root=args.root)
+        if args.format == "json":
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.render_text())
+        return 0 if report.passed else 1
+
+    if args.command == "catastrophe":
+        from mintok.catastrophe import run_catastrophe_suite
+
+        report = run_catastrophe_suite()
+        if args.format == "json":
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.render_text())
+        return 0 if report.passed else 1
+
+    if args.command == "candidate-eval":
+        from mintok.promotion_funnel import run_candidate_eval
+
+        champ_runs: dict[str, dict[str, Any]] = {}
+        cand_runs: dict[str, dict[str, Any]] = {}
+        if args.champion and args.champion.exists():
+            data = json.loads(args.champion.read_text(encoding="utf-8"))
+            runs_list = data.get("runs") or data.get("control_runs") or []
+            for r in runs_list:
+                champ_runs[r.get("task_id")] = r
+        if args.candidate and args.candidate.exists():
+            data = json.loads(args.candidate.read_text(encoding="utf-8"))
+            runs_list = data.get("runs") or data.get("mintok_runs") or []
+            for r in runs_list:
+                cand_runs[r.get("task_id")] = r
+
+        verdict = run_candidate_eval(champ_runs, cand_runs)
+        if args.format == "json":
+            print(json.dumps(verdict.to_dict(), indent=2))
+        else:
+            print(verdict.render_text())
+        return 0 if verdict.verdict in ("PROMOTE", "STRONG_PROMOTE") else 1
+
+    if args.command == "mechanism-bench":
+        from mintok.mechanism_bench import run_all_mechanism_benchmarks
+
+        report = run_all_mechanism_benchmarks()
         if args.format == "json":
             print(json.dumps(report.to_dict(), indent=2))
         else:

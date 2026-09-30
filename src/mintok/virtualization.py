@@ -366,7 +366,7 @@ def compress_stacktrace(output: str, exit_code: int = 1) -> tuple[str, dict[str,
         sline = line.strip()
         if sline.startswith("File ") and not any(sub in sline for sub in ("site-packages", "lib/python", "<string>")):
             app_frames.append(sline)
-        elif any(sline.startswith(err) for err in ("Error", "Exception", "ValueError", "TypeError", "KeyError", "AttributeError")):
+        elif any(err in sline for err in ("Error:", "Exception:")) or any(sline.startswith(err) for err in ("Error", "Exception", "ValueError", "TypeError", "KeyError", "AttributeError")):
             error_line = sline
     primary_frame = app_frames[-1] if app_frames else (lines[0] if lines else "unknown")
     meta = {
