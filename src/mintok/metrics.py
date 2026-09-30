@@ -33,6 +33,19 @@ class PricingTable:
         )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
+    def compute_cost(
+        self,
+        fresh_tokens: int = 0,
+        cached_tokens: int = 0,
+        output_tokens: int = 0,
+        reasoning_tokens: int = 0,
+    ) -> float:
+        fresh_usd = (fresh_tokens / 1_000_000.0) * self.fresh_input_price
+        cached_usd = (cached_tokens / 1_000_000.0) * self.cache_read_price
+        output_usd = (output_tokens / 1_000_000.0) * self.output_price
+        reasoning_usd = (reasoning_tokens / 1_000_000.0) * self.reasoning_price
+        return fresh_usd + cached_usd + output_usd + reasoning_usd
+
 
 # Backwards compatibility alias
 ProviderPricing = PricingTable

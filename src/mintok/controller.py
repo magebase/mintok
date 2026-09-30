@@ -246,6 +246,24 @@ class PolicyBenchRecord:
         )
 
 
+def compute_ood_score(features: StateFeatures) -> tuple[bool, float]:
+    """Compute out-of-distribution (OOD) score and boolean flag for state features."""
+    scores: list[float] = []
+    if features.tokens_spent > 500_000:
+        scores.append((features.tokens_spent - 500_000) / 300_000.0)
+    if features.turns_elapsed > 25:
+        scores.append((features.turns_elapsed - 25) / 15.0)
+    if features.repo_complexity < 0.0 or features.repo_complexity > 1.0:
+        scores.append(abs(features.repo_complexity - 0.5) * 2.0)
+    if features.active_failures > 6:
+        scores.append((features.active_failures - 6) / 4.0)
+    if features.task_issue_length > 8000:
+        scores.append((features.task_issue_length - 8000) / 4000.0)
+
+    score = max(scores) if scores else 0.0
+    return (score >= 1.0, round(min(1.0, score), 3))
+
+
 @dataclass(frozen=True, slots=True)
 class ShadowEvaluationRecord:
     """Offline shadow policy comparison record."""
@@ -259,6 +277,10 @@ class ShadowEvaluationRecord:
     agreed: bool
     counterfactual_token_delta: float = 0.0
     counterfactual_success_delta: float = 0.0
+    is_ood: bool = False
+    ood_score: float = 0.0
+    live_solved: bool = False
+    live_tokens: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -292,6 +314,8 @@ class ShadowPolicyEvaluator:
             StateFeatures(**{**base_dict, "candidate_action": shadow_action})
         )
 
+        is_ood, ood_score = compute_ood_score(record.features)
+
         return ShadowEvaluationRecord(
             task_id=record.task_id,
             turn_index=record.turn_index,
@@ -302,6 +326,10 @@ class ShadowPolicyEvaluator:
             agreed=agreed,
             counterfactual_token_delta=tokens_shadow - tokens_live,
             counterfactual_success_delta=p_shadow - p_live,
+            is_ood=is_ood,
+            ood_score=ood_score,
+            live_solved=record.eventual_success,
+            live_tokens=record.cost_tokens,
         )
 
     def evaluate_dataset(
@@ -310,17 +338,75 @@ class ShadowPolicyEvaluator:
     ) -> dict[str, Any]:
         evals = [self.evaluate_turn(r) for r in records]
         if not evals:
-            return {"total": 0, "agreement_rate": 1.0, "net_token_delta": 0.0, "net_success_delta": 0.0, "evaluations": []}
+            return {
+                "total": 0,
+                "unique_tasks": 0,
+                "agreement_rate": 1.0,
+                "net_token_delta": 0.0,
+                "mean_token_delta": 0.0,
+                "std_token_delta": 0.0,
+                "ci95_token_delta": 0.0,
+                "net_success_delta": 0.0,
+                "mean_success_delta": 0.0,
+                "std_success_delta": 0.0,
+                "ci95_success_delta": 0.0,
+                "observed_solves": 0,
+                "observed_tokens": 0,
+                "estimated_expected_solves": 0.0,
+                "estimated_solves_uncertainty": 0.0,
+                "ood_count": 0,
+                "max_ood_score": 0.0,
+                "evaluations": [],
+            }
 
+        n = len(evals)
         agreed_count = sum(1 for e in evals if e.agreed)
-        net_tokens = sum(e.counterfactual_token_delta for e in evals)
-        net_success = sum(e.counterfactual_success_delta for e in evals)
+
+        token_deltas = [e.counterfactual_token_delta for e in evals]
+        net_tokens = sum(token_deltas)
+        mean_tokens = net_tokens / n
+        std_tokens = math.sqrt(sum((x - mean_tokens) ** 2 for x in token_deltas) / max(1, n - 1)) if n > 1 else 0.0
+        ci95_tokens = 1.96 * (std_tokens / math.sqrt(n)) if n > 0 else 0.0
+
+        success_deltas = [e.counterfactual_success_delta for e in evals]
+        net_success = sum(success_deltas)
+        mean_success = net_success / n
+        std_success = math.sqrt(sum((x - mean_success) ** 2 for x in success_deltas) / max(1, n - 1)) if n > 1 else 0.0
+        ci95_success = 1.96 * (std_success / math.sqrt(n)) if n > 0 else 0.0
+
+        tasks_seen: dict[str, bool] = {}
+        for r in records:
+            tasks_seen[r.task_id] = tasks_seen.get(r.task_id, False) or r.eventual_success
+        observed_solves = sum(1 for s in tasks_seen.values() if s)
+        total_unique_tasks = len(tasks_seen)
+        observed_tokens = sum(r.cost_tokens for r in records)
+
+        task_count = max(1, total_unique_tasks)
+        task_net_success_delta = sum(e.counterfactual_success_delta for e in evals) / (n / task_count)
+        expected_solves = max(0.0, min(float(task_count), observed_solves + task_net_success_delta))
+        solves_uncertainty = max(0.1, round(std_success * math.sqrt(task_count), 2))
+
+        ood_count = sum(1 for e in evals if e.is_ood)
+        max_ood = max((e.ood_score for e in evals), default=0.0)
 
         return {
-            "total": len(evals),
-            "agreement_rate": round(agreed_count / len(evals), 4),
+            "total": n,
+            "unique_tasks": total_unique_tasks,
+            "agreement_rate": round(agreed_count / n, 4),
             "net_token_delta": round(net_tokens, 2),
+            "mean_token_delta": round(mean_tokens, 2),
+            "std_token_delta": round(std_tokens, 2),
+            "ci95_token_delta": round(ci95_tokens, 2),
             "net_success_delta": round(net_success, 4),
+            "mean_success_delta": round(mean_success, 4),
+            "std_success_delta": round(std_success, 4),
+            "ci95_success_delta": round(ci95_success, 4),
+            "observed_solves": observed_solves,
+            "observed_tokens": observed_tokens,
+            "estimated_expected_solves": round(expected_solves, 1),
+            "estimated_solves_uncertainty": solves_uncertainty,
+            "ood_count": ood_count,
+            "max_ood_score": max_ood,
             "evaluations": evals,
         }
 

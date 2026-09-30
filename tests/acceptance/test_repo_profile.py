@@ -235,3 +235,39 @@ def when_run_cli_shadow_eval(ctx, capsys):
     ctx["cli_ret"] = ret
     ctx["cli_out"] = out
 
+
+@given(parsers.parse('an initial profile has learned test "{test}" for symbol "{symbol}"'))
+def given_profile_with_learned_symbol(ctx, test: str, symbol: str):
+    profile = scan_repo_profile(ctx["root"])
+    profile.record_test_symbol(test, symbol)
+    ctx["profile"] = profile
+
+
+@when(parsers.parse('the tracked config "{filename}" is added to the repository'))
+def when_config_added(ctx, filename: str):
+    p = ctx["root"] / filename
+    p.write_text("pytest\n", encoding="utf-8")
+    ctx["added_config"] = filename
+
+
+@then("the profile is detected as stale")
+def then_profile_is_stale(ctx):
+    stale, changed = ctx["profile"].is_stale(ctx["root"])
+    assert stale
+    assert ctx["added_config"] in changed
+
+
+@then(parsers.parse('updating the profile incrementally preserves learned test "{test}" for symbol "{symbol}"'))
+def then_incremental_preserves_test(ctx, test: str, symbol: str):
+    updated = ctx["profile"].update_incremental(ctx["root"])
+    ctx["updated_profile"] = updated
+    assert symbol in updated.test_symbol_map[test]
+
+
+@then("the updated profile tracks the new config hash")
+def then_updated_tracks_config(ctx):
+    cfg = ctx["added_config"]
+    assert cfg in ctx["updated_profile"].config_hashes
+    assert len(ctx["updated_profile"].config_hashes[cfg]) > 0
+
+

@@ -7,13 +7,77 @@ frontier exploration across repeated tasks on the same codebase.
 
 from __future__ import annotations
 
-from enum import Enum
+import hashlib
 import json
+import subprocess
+import time
 from dataclasses import asdict, dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from mintok.tokens import estimate_tokens
+
+TRACKED_CONFIG_FILES = (
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg",
+    "Pipfile",
+    "poetry.lock",
+    "requirements.txt",
+    "tox.ini",
+    "Makefile",
+    "package.json",
+)
+
+
+def hash_file_bytes(p: Path) -> str:
+    """Return SHA-256 prefix hash of file bytes."""
+    if not p.is_file():
+        return ""
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    return h.hexdigest()[:16]
+
+
+def get_git_commit(root: Path) -> str:
+    """Return HEAD commit hash if root is a git repository, else empty string."""
+    git_dir = root / ".git"
+    if git_dir.exists():
+        if git_dir.is_file():
+            try:
+                content = git_dir.read_text(encoding="utf-8").strip()
+                if content.startswith("gitdir:"):
+                    git_dir = (root / content[7:].strip()).resolve()
+            except Exception:
+                pass
+        head_file = git_dir / "HEAD"
+        if head_file.exists():
+            try:
+                head_content = head_file.read_text(encoding="utf-8").strip()
+                if head_content.startswith("ref:"):
+                    ref_path = git_dir / head_content[4:].strip()
+                    if ref_path.exists():
+                        return ref_path.read_text(encoding="utf-8").strip()[:16]
+                else:
+                    return head_content[:16]
+            except Exception:
+                pass
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if res.returncode == 0:
+            return res.stdout.strip()[:16]
+    except Exception:
+        pass
+    return ""
 
 
 @dataclass
@@ -37,6 +101,13 @@ class RepoProfile:
     co_change_graph: dict[str, list[str]] = field(default_factory=dict)
     failure_modes: list[dict[str, Any]] = field(default_factory=list)
     metrics: dict[str, Any] = field(default_factory=dict)
+    profile_schema_version: str = "1.1.0"
+    mintok_version: str = "3.1.0"
+    git_commit: str = ""
+    generated_at: float = 0.0
+    repo_root: str = ""
+    evidence: dict[str, str] = field(default_factory=dict)
+    config_hashes: dict[str, str] = field(default_factory=dict)
 
     def render_context(self) -> str:
         """Render a compact ~100-token execution profile for model context."""
@@ -77,8 +148,68 @@ class RepoProfile:
         self.failure_modes.append({
             "signature": signature,
             "note": note,
-            "recorded_at": Path(__file__).stat().st_mtime,
+            "recorded_at": time.time(),
         })
+
+    def static_dict(self) -> dict[str, Any]:
+        """Return dictionary of static/scanned facts (excluding learned feedback)."""
+        return {
+            "profile_schema_version": self.profile_schema_version,
+            "mintok_version": self.mintok_version,
+            "repo_name": self.repo_name,
+            "repo_root": self.repo_root,
+            "git_commit": self.git_commit,
+            "generated_at": self.generated_at,
+            "language": self.language,
+            "package_manager": self.package_manager,
+            "test_runner": self.test_runner,
+            "test_command": self.test_command,
+            "packages": list(self.packages),
+            "key_directories": list(self.key_directories),
+            "complexity_score": self.complexity_score,
+            "recommended_strategy": self.recommended_strategy,
+            "build_commands": list(self.build_commands),
+            "workspace_topology": {k: list(v) for k, v in self.workspace_topology.items()},
+            "generated_directories": list(self.generated_directories),
+            "ci_conventions": list(self.ci_conventions),
+            "metrics": dict(self.metrics),
+            "evidence": dict(self.evidence),
+            "config_hashes": dict(self.config_hashes),
+        }
+
+    def learned_dict(self) -> dict[str, Any]:
+        """Return dictionary of learned associations (test-to-symbol, co-changes, failure modes)."""
+        return {
+            "test_symbol_map": {k: list(v) for k, v in self.test_symbol_map.items()},
+            "co_change_graph": {k: list(v) for k, v in self.co_change_graph.items()},
+            "failure_modes": [dict(f) for f in self.failure_modes],
+        }
+
+    def is_stale(self, root: Path) -> tuple[bool, list[str]]:
+        """Check if any tracked config file has changed, been added, or been removed."""
+        changed_files: list[str] = []
+        for cfg in TRACKED_CONFIG_FILES:
+            cfg_path = root / cfg
+            if cfg_path.is_file():
+                h = hash_file_bytes(cfg_path)
+                if self.config_hashes.get(cfg) != h:
+                    changed_files.append(cfg)
+            elif cfg in self.config_hashes:
+                changed_files.append(cfg)
+
+        current_commit = get_git_commit(root)
+        if self.git_commit and current_commit and self.git_commit != current_commit:
+            changed_files.append(f"git_commit:{self.git_commit}->{current_commit}")
+
+        return (len(changed_files) > 0, changed_files)
+
+    def update_incremental(self, root: Path) -> RepoProfile:
+        """Scan fresh static attributes from root, but preserve learned mappings from self."""
+        fresh = scan_repo_profile(root, repo_name=self.repo_name)
+        fresh.test_symbol_map = {k: list(v) for k, v in self.test_symbol_map.items()}
+        fresh.co_change_graph = {k: list(v) for k, v in self.co_change_graph.items()}
+        fresh.failure_modes = [dict(f) for f in self.failure_modes]
+        return fresh
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -95,6 +226,13 @@ class RepoProfile:
             "co_change_graph": {},
             "failure_modes": [],
             "metrics": {},
+            "profile_schema_version": "1.1.0",
+            "mintok_version": "3.1.0",
+            "git_commit": "",
+            "generated_at": 0.0,
+            "repo_root": "",
+            "evidence": {},
+            "config_hashes": {},
         }
         for k, v in defaults.items():
             if k not in data:
@@ -117,7 +255,16 @@ def get_or_create_repo_profile(root: Path, cache_dir: Path | None = None) -> Rep
     profile_file = cache_base / "profile.json"
     if profile_file.exists():
         try:
-            return RepoProfile.load(profile_file)
+            profile = RepoProfile.load(profile_file)
+            stale, _ = profile.is_stale(root)
+            if not stale:
+                return profile
+            updated = profile.update_incremental(root)
+            try:
+                updated.save(profile_file)
+            except Exception:
+                pass
+            return updated
         except Exception:
             pass
 
@@ -151,19 +298,37 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
         elif p.is_file():
             files.append(rel)
 
+    evidence: dict[str, str] = {}
+    config_hashes: dict[str, str] = {}
+    for cfg in TRACKED_CONFIG_FILES:
+        cfg_path = root / cfg
+        if cfg_path.is_file():
+            config_hashes[cfg] = hash_file_bytes(cfg_path)
+
     # Detect package manager
     pkg_mgr = "unknown"
     rel_files_str = {str(f) for f in files}
-    if "poetry.lock" in rel_files_str or any("tool.poetry" in p.read_text(errors="ignore") for p in [root / "pyproject.toml"] if p.exists()):
+    if "poetry.lock" in rel_files_str:
         pkg_mgr = "poetry"
+        evidence["package_manager"] = "Detected poetry from poetry.lock"
+    elif any("tool.poetry" in p.read_text(errors="ignore") for p in [root / "pyproject.toml"] if p.exists()):
+        pkg_mgr = "poetry"
+        evidence["package_manager"] = "Detected poetry from [tool.poetry] in pyproject.toml"
     elif "pyproject.toml" in rel_files_str:
         pkg_mgr = "pyproject"
+        evidence["package_manager"] = "Detected pyproject from pyproject.toml"
     elif "setup.py" in rel_files_str or "setup.cfg" in rel_files_str:
         pkg_mgr = "setuptools"
+        matched = "setup.py" if "setup.py" in rel_files_str else "setup.cfg"
+        evidence["package_manager"] = f"Detected setuptools from {matched}"
     elif "Pipfile" in rel_files_str:
         pkg_mgr = "pipenv"
+        evidence["package_manager"] = "Detected pipenv from Pipfile"
     elif "requirements.txt" in rel_files_str:
         pkg_mgr = "pip"
+        evidence["package_manager"] = "Detected pip from requirements.txt"
+    else:
+        evidence["package_manager"] = "Defaulted to unknown"
 
     # Detect test runner & command
     test_runner = "pytest"
@@ -171,6 +336,9 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
     if any("unittest" in str(f) for f in files) and not any("pytest" in str(f) for f in files):
         test_runner = "unittest"
         test_cmd = "python -m unittest discover"
+        evidence["test_runner"] = "Detected unittest discover from test files"
+    else:
+        evidence["test_runner"] = "Detected pytest from test layout / conventions"
 
     # Identify key directories
     key_dirs = sorted(
@@ -199,6 +367,9 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
     elif "Makefile" in rel_files_str:
         build_cmds.append("make")
 
+    if build_cmds:
+        evidence["build_commands"] = f"{len(build_cmds)} detected: {', '.join(build_cmds)}"
+
     generated_dirs = [d for d in dirs if any(d == g or d.endswith(f"/{g}") for g in ("build", "dist", ".tox", "target"))]
 
     ci = []
@@ -208,6 +379,9 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
         ci.append("circleci")
     if "tox.ini" in rel_files_str:
         ci.append("tox")
+
+    if ci:
+        evidence["ci"] = f"{len(ci)} conventions detected: {', '.join(ci)}"
 
     topology: dict[str, list[str]] = {}
     for pkg in packages:
@@ -221,6 +395,10 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
         "package_count": package_count,
         "max_depth": max_depth,
     }
+
+    git_commit = get_git_commit(root)
+    generated_at = time.time()
+    repo_root_str = str(root.resolve())
 
     return RepoProfile(
         repo_name=name,
@@ -237,6 +415,13 @@ def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
         generated_directories=generated_dirs,
         ci_conventions=ci,
         metrics=metrics,
+        profile_schema_version="1.1.0",
+        mintok_version="3.1.0",
+        git_commit=git_commit,
+        generated_at=generated_at,
+        repo_root=repo_root_str,
+        evidence=evidence,
+        config_hashes=config_hashes,
     )
 
 

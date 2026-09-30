@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import os
 import shutil
@@ -31,6 +32,7 @@ sys.path.insert(0, str(HARNESS_ROOT / "benchmarks" / "e2e"))
 sys.path.insert(0, str(HARNESS_ROOT / "benchmarks" / "public"))
 
 from live import run_loop
+from mintok.metrics import PricingTable
 from mintok.public_bench import (
     PublicBenchmarkReport,
     PublicBenchmarkTask,
@@ -38,6 +40,7 @@ from mintok.public_bench import (
     evaluate_paired_public_runs,
     verify_window_fingerprint,
 )
+from mintok.records import PolicyMaturityTier, classify_policy_tier
 from model_runner import resolve_api_key
 
 WINDOWS_DIR = Path(__file__).resolve().parent / "windows"
@@ -325,6 +328,8 @@ def save_live_progress(
     provider: str,
     run_name: str = "swe_rebench_live_space_bunny_alpha",
     final: bool = False,
+    policy: str = "v3",
+    provenance: dict[str, Any] | None = None,
 ) -> PublicBenchmarkReport:
     report = evaluate_paired_public_runs(
         ctrl_runs,
@@ -344,8 +349,11 @@ def save_live_progress(
         "benchmark": "swe_rebench_live",
         "model": model,
         "provider": provider,
+        "policy": policy,
+        "policy_tier": classify_policy_tier(policy).value,
         "run_name": run_name,
         "timestamp": time.time(),
+        "provenance": provenance or {},
         "report": {
             "total_tasks": report.total_tasks,
             "control_solved": report.control_solved,
@@ -390,13 +398,45 @@ def main() -> None:
     parser.add_argument("--provider", default="openrouter")
     parser.add_argument("--resume", action="store_true", default=True)
     parser.add_argument("--run-name", default=None, help="Custom output run name")
+    parser.add_argument(
+        "--allow-legacy-policy",
+        action="store_true",
+        default=False,
+        help="Explicitly permit running an obsolete policy (e.g. adaptive, S, C)",
+    )
     args = parser.parse_args()
+
+    policy_tier = classify_policy_tier(args.mintok_policy)
+    if policy_tier == PolicyMaturityTier.LEGACY_DEVELOPMENT_ONLY and not args.allow_legacy_policy:
+        parser.error(
+            f"Policy '{args.mintok_policy}' is classified as {policy_tier.value} (scientifically obsolete).\n"
+            f"MinTok 3.1 mandates evaluating unrestricted inference architectures (e.g. 'v3').\n"
+            f"To run this obsolete architecture intentionally, pass --allow-legacy-policy."
+        )
 
     api_key = resolve_api_key(args.provider)
     assert api_key, f"API key for {args.provider} not resolved!"
 
     tasks = load_swe_rebench_window(args.window)
     selected_tasks = tasks[args.offset : (args.offset + args.limit if args.limit is not None else len(tasks))]
+
+    task_ids = [t["instance_id"] for t in selected_tasks]
+    task_set_hash = hashlib.sha256("::".join(sorted(task_ids)).encode("utf-8")).hexdigest()[:16]
+    repo_commits = [f"{t.get('repo', '')}:{t.get('base_commit', '')}" for t in selected_tasks]
+    repo_commits_hash = hashlib.sha256("::".join(sorted(repo_commits)).encode("utf-8")).hexdigest()[:16]
+
+    provenance = {
+        "mintok_commit": "a471bcf",
+        "policy": args.mintok_policy,
+        "policy_tier": policy_tier.value,
+        "model": args.model,
+        "provider": args.provider,
+        "window": args.window,
+        "task_set_hash": task_set_hash,
+        "repo_base_commits_hash": repo_commits_hash,
+        "pricing_table_hash": PricingTable().pricing_table_hash(),
+        "timestamp": time.time(),
+    }
 
     model_slug = args.model.replace("/", "_").replace(":", "_").replace("-", "_")
     window_slug = Path(args.window).stem.replace(".json", "")
@@ -466,7 +506,16 @@ def main() -> None:
                 else:
                     mintok_runs.append(rec)
 
-        rep = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, run_name=run_name, final=False)
+        rep = save_live_progress(
+            ctrl_runs,
+            mintok_runs,
+            args.model,
+            args.provider,
+            run_name=run_name,
+            final=False,
+            policy=args.mintok_policy,
+            provenance=provenance,
+        )
         c_s = sum(1 for r in ctrl_runs if r.solved)
         m_s = sum(1 for r in mintok_runs if r.solved)
         c_tok = sum(r.provider_tokens for r in ctrl_runs)
@@ -489,7 +538,16 @@ def main() -> None:
         print(f"  Economic Yield Multiplier: {yield_ratio:.2f}x (both: {rep.both_solve}, ctrl_only: {rep.control_only}, min_only: {rep.mintok_only}, fail: {rep.both_fail})")
 
     # Evaluate final paired results with full bootstrap
-    final_report = save_live_progress(ctrl_runs, mintok_runs, args.model, args.provider, run_name=run_name, final=True)
+    final_report = save_live_progress(
+        ctrl_runs,
+        mintok_runs,
+        args.model,
+        args.provider,
+        run_name=run_name,
+        final=True,
+        policy=args.mintok_policy,
+        provenance=provenance,
+    )
 
     print("\n" + "=" * 70)
     print("LIVE SWE-REBENCH FINAL RESULTS (GENUINE RUNS)")

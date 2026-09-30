@@ -9,10 +9,29 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Iterable
 
 from mintok.metrics import RunRecord
+
+
+class PolicyMaturityTier(str, Enum):
+    """Maturity tier for agent execution policies."""
+
+    BASELINE = "BASELINE"
+    CURRENT_EXPERIMENTAL = "CURRENT_EXPERIMENTAL"
+    LEGACY_DEVELOPMENT_ONLY = "LEGACY_DEVELOPMENT_ONLY"
+
+
+def classify_policy_tier(policy: str) -> PolicyMaturityTier:
+    """Classify policy into BASELINE, CURRENT_EXPERIMENTAL, or LEGACY_DEVELOPMENT_ONLY."""
+    p = policy.lower().strip()
+    if p in ("control", "baseline", "raw-shell"):
+        return PolicyMaturityTier.BASELINE
+    if p in ("v3", "v3_v", "v3_vc", "v3_vcr", "v3_vcrm", "v3_vcrmp", "v3_full", "current"):
+        return PolicyMaturityTier.CURRENT_EXPERIMENTAL
+    return PolicyMaturityTier.LEGACY_DEVELOPMENT_ONLY
 
 
 @dataclass(frozen=True, slots=True)

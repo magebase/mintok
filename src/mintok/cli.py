@@ -88,6 +88,15 @@ def build_parser() -> argparse.ArgumentParser:
     se.add_argument("--solve-value", type=float, default=1.0)
     se.add_argument("--token-lambda", type=float, default=0.000005)
     se.add_argument("--format", choices=("text", "json"), default="text")
+
+    doc = sub.add_parser("doctor", help="run preflight sanity checks on repository environment")
+    doc.add_argument("root", type=Path, nargs="?", default=Path("."))
+    doc.add_argument("--policy", default="v3", help="policy to verify compatibility for")
+    doc.add_argument("--format", choices=("text", "json"), default="text")
+
+    insp = sub.add_parser("inspect-run", help="inspect trajectory economic trace, waste taxes, and elimination")
+    insp.add_argument("run_file", type=Path, help="path to trajectory or benchmark run JSON/JSONL")
+    insp.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
@@ -176,17 +185,60 @@ def main(argv: list[str] | None = None) -> int:
         if args.format == "json":
             res_dict = {
                 "total": res["total"],
+                "unique_tasks": res["unique_tasks"],
                 "agreement_rate": res["agreement_rate"],
-                "net_token_delta": res["net_token_delta"],
-                "net_success_delta": res["net_success_delta"],
+                "observed": {
+                    "solves": res["observed_solves"],
+                    "tokens": res["observed_tokens"],
+                },
+                "counterfactual_estimate": {
+                    "net_token_delta": res["net_token_delta"],
+                    "mean_token_delta": res["mean_token_delta"],
+                    "std_token_delta": res["std_token_delta"],
+                    "ci95_token_delta": res["ci95_token_delta"],
+                    "net_success_delta": res["net_success_delta"],
+                    "mean_success_delta": res["mean_success_delta"],
+                    "std_success_delta": res["std_success_delta"],
+                    "ci95_success_delta": res["ci95_success_delta"],
+                    "estimated_expected_solves": res["estimated_expected_solves"],
+                    "estimated_solves_uncertainty": res["estimated_solves_uncertainty"],
+                    "ood_count": res["ood_count"],
+                    "max_ood_score": res["max_ood_score"],
+                },
                 "evaluations": [e.to_dict() for e in res["evaluations"]],
             }
             print(json.dumps(res_dict, indent=2))
         else:
             print(f"Shadow Policy Evaluation ({res['total']} turns):")
             print(f"  Agreement Rate:    {res['agreement_rate'] * 100:.1f}%")
-            print(f"  Net Token Delta:   {res['net_token_delta']:+,.0f} tokens")
-            print(f"  Net Success Delta: {res['net_success_delta']:+.4f}")
+            print("  Observed:")
+            print(f"    actual solves:   {res['observed_solves']} / {res['unique_tasks']}")
+            print(f"    actual tokens:   {res['observed_tokens']:,} tokens")
+            print("  Counterfactual estimate:")
+            print(f"    net token delta: {res['net_token_delta']:+,.0f} tokens (mean: {res['mean_token_delta']:+,.0f} ± {res['ci95_token_delta']:,.0f} 95% CI)")
+            print(f"    net success delta: {res['net_success_delta']:+.4f} (mean: {res['mean_success_delta']:+.4f} ± {res['ci95_success_delta']:.4f} 95% CI)")
+            print(f"    estimated expected solves: {res['estimated_expected_solves']:.1f} ± {res['estimated_solves_uncertainty']:.1f}")
+            print(f"    OOD detections:  {res['ood_count']} / {res['total']} (max score: {res['max_ood_score']:.2f})")
+        return 0
+
+    if args.command == "doctor":
+        from mintok.doctor import run_doctor_checks
+
+        report = run_doctor_checks(args.root, policy=args.policy)
+        if args.format == "json":
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.render_text())
+        return 0 if report.passed else 1
+
+    if args.command == "inspect-run":
+        from mintok.inspector import inspect_run
+
+        report = inspect_run(args.run_file)
+        if args.format == "json":
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.render_text())
         return 0
 
     ir = compile_repository(args.root)

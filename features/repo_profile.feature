@@ -76,3 +76,24 @@ Feature: Repository execution profiles and complexity priors
     When running "mintok shadow-eval" on the records
     Then the CLI stdout contains "Shadow Policy Evaluation (2 turns):"
     And the CLI stdout contains "Agreement Rate:"
+
+  Scenario: Incremental repository profile updating preserving learned knowledge
+    Given a repository with structure:
+      """
+      pyproject.toml
+      src/calc/__init__.py
+      src/calc/core.py
+      tests/test_calc.py
+      """
+    And an initial profile has learned test "tests/test_calc.py" for symbol "calc.add"
+    When the tracked config "requirements.txt" is added to the repository
+    Then the profile is detected as stale
+    And updating the profile incrementally preserves learned test "tests/test_calc.py" for symbol "calc.add"
+    And the updated profile tracks the new config hash
+
+  Scenario: Shadow policy evaluation reporting observed vs counterfactual uncertainty
+    Given a PolicyBench JSONL file with 2 state records
+    When running "mintok shadow-eval" on the records
+    Then the CLI stdout contains "Observed:"
+    And the CLI stdout contains "Counterfactual estimate:"
+    And the CLI stdout contains "estimated expected solves:"
