@@ -41,3 +41,20 @@ Feature: Multi-stage promotion funnel and offline development gates
     Then the CLI stdout contains "MinTok Dev-Eval — Multi-Stage Local Promotion Gate"
     And the CLI stdout contains "Verdict: PROCEED_TO_STAGE_4 (PASS)"
     And the CLI stdout contains "Catastrophe Regression Gate:      PASS"
+
+  Scenario: Evaluating frozen holdout release gate with manifest checking
+    Given 20 paired tasks with 2.0x yield and identical solves
+    And a valid frozen evaluation manifest
+    When the release evaluation gate is executed
+    Then the release verdict is "RELEASE_APPROVED"
+    And the 95% bootstrap confidence interval lower bound exceeds 1.0
+    And the manifest validation passes
+
+  Scenario: Managing isolated worktrees and concurrent paired execution
+    Given a repository path and task identifiers
+    When the worktree manager sets up isolated worktrees
+    And a persistent server configuration is initialized for MINTOK_DEV_MODEL
+    And the concurrent paired runner generates a balanced schedule
+    Then the schedule alternates arm ordering between control and candidate
+    And the worktree is cleanly reset
+

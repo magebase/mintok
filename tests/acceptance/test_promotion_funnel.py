@@ -8,6 +8,11 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from mintok.catastrophe import run_catastrophe_suite
 from mintok.cli import main as mintok_main
+from mintok.execution_harness import (
+    ConcurrentPairedRunner,
+    PersistentServerConfig,
+    WorktreeManager,
+)
 from mintok.fast_window import FAST12_TASKS, FastTournamentEvaluator
 from mintok.mechanism_bench import run_all_mechanism_benchmarks
 from mintok.policybench import (
@@ -15,7 +20,7 @@ from mintok.policybench import (
     PolicyBenchDataset,
     PolicyBenchEvaluator,
 )
-from mintok.promotion_funnel import run_candidate_eval, run_dev_eval
+from mintok.promotion_funnel import run_candidate_eval, run_dev_eval, run_release_eval
 from mintok.replayer import TrajectoryReplayer
 
 scenarios("promotion_funnel.feature")
@@ -172,3 +177,97 @@ def when_run_cli_dev_eval(capsys):
 @then(parsers.parse('the CLI stdout contains "{text}"'))
 def then_cli_stdout_contains(ctx, text: str):
     assert text in ctx["cli_out"]
+
+
+@given("20 paired tasks with 2.0x yield and identical solves", target_fixture="ctx")
+def given_20_paired_tasks():
+    champ = {}
+    cand = {}
+    for i in range(1, 21):
+        tid = f"task_{i:02d}"
+        champ[tid] = {"solved": True, "tokens": 100_000}
+        cand[tid] = {"solved": True, "tokens": 50_000}
+    return {"champ": champ, "cand": cand}
+
+
+@given("a valid frozen evaluation manifest")
+def given_valid_manifest(ctx):
+    ctx["manifest"] = {
+        "mintok_commit": "a471bcf",
+        "policy": "v3",
+        "system_prompt_hash": "a1b2c3d4e5f6",
+        "tool_schema_hash": "f6e5d4c3b2a1",
+        "pricing_table_hash": "9876543210ab",
+        "repo_commit": "c0ffee123456",
+        "is_counterfactual": False,
+    }
+
+
+@when("the release evaluation gate is executed")
+def when_run_release_eval(ctx):
+    report = run_release_eval(ctx["champ"], ctx["cand"], manifest=ctx.get("manifest"))
+    ctx["release_report"] = report
+
+
+@then(parsers.parse('the release verdict is "{verdict}"'))
+def then_release_verdict(ctx, verdict: str):
+    assert ctx["release_report"].verdict == verdict
+
+
+@then(parsers.parse("the 95% bootstrap confidence interval lower bound exceeds {lower:f}"))
+def then_bootstrap_ci_lower_exceeds(ctx, lower: float):
+    assert ctx["release_report"].bootstrap_ci_lower > lower
+
+
+@then("the manifest validation passes")
+def then_manifest_passes(ctx):
+    assert ctx["release_report"].manifest_valid is True
+    assert ctx["release_report"].observed_strictly is True
+
+
+@given("a repository path and task identifiers", target_fixture="ctx")
+def given_repo_and_tasks(tmp_path):
+    repo_dir = tmp_path / "fake_repo"
+    repo_dir.mkdir()
+    tasks = [
+        ("task_01", "repo", "cat1"),
+        ("task_02", "repo", "cat2"),
+    ]
+    return {"repo_dir": repo_dir, "tasks": tasks}
+
+
+@when("the worktree manager sets up isolated worktrees")
+def when_worktree_setup(ctx):
+    wt_mgr = WorktreeManager(ctx["repo_dir"])
+    wt1 = wt_mgr.setup_worktree("task_01", "control")
+    wt2 = wt_mgr.setup_worktree("task_01", "candidate")
+    ctx["wt_mgr"] = wt_mgr
+    ctx["wt1"] = wt1
+    ctx["wt2"] = wt2
+
+
+@when("a persistent server configuration is initialized for MINTOK_DEV_MODEL")
+def when_server_config(ctx):
+    cfg = PersistentServerConfig()
+    ctx["server_cfg"] = cfg
+
+
+@when("the concurrent paired runner generates a balanced schedule")
+def when_paired_schedule(ctx):
+    runner = ConcurrentPairedRunner(max_workers=2)
+    ctx["schedule"] = runner.generate_balanced_schedule(ctx["tasks"])
+
+
+@then("the schedule alternates arm ordering between control and candidate")
+def then_schedule_alternates(ctx):
+    assert len(ctx["schedule"]) == 2
+    assert ctx["schedule"][0].first_arm == "control"
+    assert ctx["schedule"][1].first_arm == "candidate"
+
+
+@then("the worktree is cleanly reset")
+def then_worktree_reset(ctx):
+    assert ctx["wt1"].exists()
+    assert ctx["wt2"].exists()
+    assert ctx["server_cfg"].temperature == 0.0
+

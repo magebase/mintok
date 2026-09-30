@@ -112,6 +112,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     mech = sub.add_parser("mechanism-bench", help="run isolated mechanism benchmarks and next-action invariance")
     mech.add_argument("--format", choices=("text", "json"), default="text")
+
+    rel = sub.add_parser("release-eval", help="run Stage 5 / Stage 6 frozen holdout release evaluation gate")
+    rel.add_argument("--candidate", type=Path, default=None, help="candidate runs JSON/JSONL")
+    rel.add_argument("--champion", type=Path, default=None, help="champion runs JSON/JSONL")
+    rel.add_argument("--manifest", type=Path, default=None, help="evaluation manifest JSON")
+    rel.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
@@ -308,6 +314,33 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(report.render_text())
         return 0
+
+    if args.command == "release-eval":
+        from mintok.promotion_funnel import run_release_eval
+
+        champ_runs: dict[str, dict[str, Any]] = {}
+        cand_runs: dict[str, dict[str, Any]] = {}
+        manifest_data: dict[str, Any] = {}
+
+        if args.champion and args.champion.exists():
+            data = json.loads(args.champion.read_text(encoding="utf-8"))
+            runs_list = data.get("runs") or data.get("control_runs") or []
+            for r in runs_list:
+                champ_runs[r.get("task_id")] = r
+        if args.candidate and args.candidate.exists():
+            data = json.loads(args.candidate.read_text(encoding="utf-8"))
+            runs_list = data.get("runs") or data.get("mintok_runs") or []
+            for r in runs_list:
+                cand_runs[r.get("task_id")] = r
+        if args.manifest and args.manifest.exists():
+            manifest_data = json.loads(args.manifest.read_text(encoding="utf-8"))
+
+        report = run_release_eval(champ_runs, cand_runs, manifest_data)
+        if args.format == "json":
+            print(json.dumps(report.to_dict(), indent=2))
+        else:
+            print(report.render_text())
+        return 0 if report.verdict in ("RELEASE_APPROVED", "CONDITIONAL_RELEASE") else 1
 
     ir = compile_repository(args.root)
     for diagnostic in ir.diagnostics:

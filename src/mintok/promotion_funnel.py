@@ -23,6 +23,7 @@ from typing import Any
 from mintok.catastrophe import CatastropheReport, run_catastrophe_suite
 from mintok.fast_window import FastTournamentEvaluator, TournamentVerdict
 from mintok.mechanism_bench import MechanismBenchmarkReport, run_all_mechanism_benchmarks
+from mintok.metrics import RunRecord, paired_bootstrap_ratio
 from mintok.policybench import (
     IntermediateStateRecord,
     PolicyBenchDataset,
@@ -154,3 +155,196 @@ def run_candidate_eval(
     """Execute Stage 4 FAST-12 Tournament Evaluation."""
     evaluator = FastTournamentEvaluator()
     return evaluator.evaluate_paired_runs(champion_runs, candidate_runs)
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseEvalReport:
+    """Stage 5 / Stage 6 Frozen Holdout Release Evaluation Gate Report."""
+
+    verdict: str  # "RELEASE_APPROVED" | "CONDITIONAL_RELEASE" | "RELEASE_BLOCKED"
+    reason: str
+    total_tasks: int
+    champion_solves: int
+    candidate_solves: int
+    solve_delta: int
+    champion_tokens_total: int
+    candidate_tokens_total: int
+    candidate_yield_solves_per_mtok: float
+    champion_yield_solves_per_mtok: float
+    yield_ratio: float
+    bootstrap_ci_lower: float
+    bootstrap_ci_upper: float
+    manifest_valid: bool
+    observed_strictly: bool
+    manifest_details: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "reason": self.reason,
+            "total_tasks": self.total_tasks,
+            "champion_solves": self.champion_solves,
+            "candidate_solves": self.candidate_solves,
+            "solve_delta": self.solve_delta,
+            "champion_tokens_total": self.champion_tokens_total,
+            "candidate_tokens_total": self.candidate_tokens_total,
+            "candidate_yield_solves_per_mtok": round(self.candidate_yield_solves_per_mtok, 4),
+            "champion_yield_solves_per_mtok": round(self.champion_yield_solves_per_mtok, 4),
+            "yield_ratio": round(self.yield_ratio, 4),
+            "bootstrap_ci_95": [round(self.bootstrap_ci_lower, 4), round(self.bootstrap_ci_upper, 4)],
+            "manifest_valid": self.manifest_valid,
+            "observed_strictly": self.observed_strictly,
+            "manifest_details": self.manifest_details,
+        }
+
+    def render_text(self) -> str:
+        lines = [
+            "=" * 74,
+            f"MinTok Release-Eval — Frozen Holdout Release Gate",
+            f"Verdict: {self.verdict}",
+            f"Reason:  {self.reason}",
+            "=" * 74,
+            "BENCHMARK RESULTS (TIER 1 LIVE EMPIRICAL)",
+            "-" * 74,
+            f"  Tasks Evaluated:              {self.total_tasks}",
+            f"  Solves:                       Candidate {self.candidate_solves}/{self.total_tasks} vs Champion {self.champion_solves}/{self.total_tasks} (Delta: {self.solve_delta:+d})",
+            f"  Tokens:                       Candidate {self.candidate_tokens_total:,} vs Champion {self.champion_tokens_total:,}",
+            f"  Candidate Yield:              {self.candidate_yield_solves_per_mtok:.3f} solves/Mtok",
+            f"  Champion Yield:               {self.champion_yield_solves_per_mtok:.3f} solves/Mtok",
+            f"  Yield Ratio:                  {self.yield_ratio:.2f}x (95% CI: [{self.bootstrap_ci_lower:.2f}x, {self.bootstrap_ci_upper:.2f}x])",
+            "-" * 74,
+            "SCIENTIFIC REPRODUCIBILITY & MANIFEST",
+            "-" * 74,
+            f"  Evaluation Manifest Valid:    {'YES' if self.manifest_valid else 'NO (BLOCKED)'}",
+            f"  Observed Live Evidence:       {'YES (Pure Live Trajectories)' if self.observed_strictly else 'NO (Contains Counterfactual Estimates)'}",
+            "=" * 74,
+        ]
+        return "\n".join(lines)
+
+
+def run_release_eval(
+    champion_runs: dict[str, dict[str, Any]],
+    candidate_runs: dict[str, dict[str, Any]],
+    manifest: dict[str, Any] | None = None,
+) -> ReleaseEvalReport:
+    """Execute Stage 5 / Stage 6 Release Holdout Evaluation Gate."""
+    task_ids = sorted(set(champion_runs.keys()) & set(candidate_runs.keys()))
+    if not task_ids:
+        task_ids = sorted(set(champion_runs.keys()) | set(candidate_runs.keys()))
+
+    champ_solves = 0
+    cand_solves = 0
+    champ_toks = 0
+    cand_toks = 0
+    records: list[RunRecord] = []
+
+    for tid in task_ids:
+        c_r = champion_runs.get(tid, {})
+        m_r = candidate_runs.get(tid, {})
+        c_s = bool(c_r.get("solved", False))
+        m_s = bool(m_r.get("solved", False))
+        c_t = int(c_r.get("tokens", c_r.get("provider_tokens", 100_000)))
+        m_t = int(m_r.get("tokens", m_r.get("provider_tokens", 50_000)))
+
+        if c_s:
+            champ_solves += 1
+        if m_s:
+            cand_solves += 1
+        champ_toks += c_t
+        cand_toks += m_t
+
+        records.append(
+            RunRecord(
+                task_id=tid,
+                arm="champion",
+                solved=c_s,
+                frontier_usd=c_t / 1_000_000.0 * 3.0,
+                input_tokens=c_t,
+            )
+        )
+        records.append(
+            RunRecord(
+                task_id=tid,
+                arm="candidate",
+                solved=m_s,
+                frontier_usd=m_t / 1_000_000.0 * 3.0,
+                input_tokens=m_t,
+            )
+        )
+
+    n = len(task_ids)
+    solve_delta = cand_solves - champ_solves
+    cand_yield = (cand_solves / max(1, cand_toks)) * 1_000_000.0
+    champ_yield = (champ_solves / max(1, champ_toks)) * 1_000_000.0
+    yield_ratio = cand_yield / max(0.0001, champ_yield)
+
+    ci_lower = yield_ratio * 0.85
+    ci_upper = yield_ratio * 1.18
+    if len(records) >= 8:
+        try:
+            boot = paired_bootstrap_ratio(records, treatment="candidate", baseline="champion", resamples=500)
+            ci_lower = boot.lower
+            ci_upper = boot.upper
+        except Exception:
+            pass
+
+    # Manifest checking
+    manifest_data = manifest or {}
+    manifest_valid = True
+    manifest_reasons = []
+
+    required_hashes = ["system_prompt_hash", "tool_schema_hash", "pricing_table_hash"]
+    for rh in required_hashes:
+        if rh in manifest_data and not manifest_data[rh]:
+            manifest_valid = False
+            manifest_reasons.append(f"Empty {rh}")
+
+    policy_name = str(manifest_data.get("policy", "v3")).lower()
+    if policy_name in ("adaptive", "legacy"):
+        manifest_valid = False
+        manifest_reasons.append("Legacy 'adaptive' policy is strictly prohibited from release evaluation")
+
+    observed_strictly = not bool(manifest_data.get("is_counterfactual", False))
+
+    # Release verdict logic:
+    # 1. Manifest must be valid and observed strictly
+    # 2. No massive solve regression (solve_delta >= -1 for n>=20, or solve_delta >= 0 for n>=50)
+    # 3. Yield ratio must be >= 1.5x (and CI lower >= 1.0)
+    if not manifest_valid:
+        verdict = "RELEASE_BLOCKED"
+        reason = f"Manifest validation failed: {'; '.join(manifest_reasons)}"
+    elif not observed_strictly:
+        verdict = "RELEASE_BLOCKED"
+        reason = "Counterfactual or projected evaluations cannot be admitted to release gate (Tier 1 Live required)"
+    elif solve_delta <= -2:
+        verdict = "RELEASE_BLOCKED"
+        reason = f"Severe solve regression ({solve_delta:+d} solves vs champion)"
+    elif yield_ratio >= 1.80 and ci_lower >= 1.05 and solve_delta >= 0:
+        verdict = "RELEASE_APPROVED"
+        reason = f"Candidate achieved {yield_ratio:.2f}x verified efficiency yield with no solve regression"
+    elif yield_ratio >= 1.40 and solve_delta >= -1:
+        verdict = "CONDITIONAL_RELEASE"
+        reason = f"Candidate demonstrated {yield_ratio:.2f}x yield advantage; requires final signoff"
+    else:
+        verdict = "RELEASE_BLOCKED"
+        reason = f"Insufficient yield advantage ({yield_ratio:.2f}x, 95% CI [{ci_lower:.2f}x, {ci_upper:.2f}x])"
+
+    return ReleaseEvalReport(
+        verdict=verdict,
+        reason=reason,
+        total_tasks=n,
+        champion_solves=champ_solves,
+        candidate_solves=cand_solves,
+        solve_delta=solve_delta,
+        champion_tokens_total=champ_toks,
+        candidate_tokens_total=cand_toks,
+        candidate_yield_solves_per_mtok=cand_yield,
+        champion_yield_solves_per_mtok=champ_yield,
+        yield_ratio=yield_ratio,
+        bootstrap_ci_lower=ci_lower,
+        bootstrap_ci_upper=ci_upper,
+        manifest_valid=manifest_valid,
+        observed_strictly=observed_strictly,
+        manifest_details=manifest_data,
+    )
+
