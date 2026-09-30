@@ -9,18 +9,34 @@ from pytest_bdd import given, parsers, scenarios, then, when
 from mintok.catastrophe import run_catastrophe_suite
 from mintok.cli import main as mintok_main
 from mintok.execution_harness import (
+    BehavioralDivergence,
     ConcurrentPairedRunner,
+    LocalStage3Runner,
     PersistentServerConfig,
     WorktreeManager,
+    compute_behavioral_divergence,
 )
-from mintok.fast_window import FAST12_TASKS, FastTournamentEvaluator
+from mintok.fast_window import (
+    FAST12_TASKS,
+    FAST_COVERAGE_TASKS,
+    AdaptiveTaskScheduler,
+    FastTaskResult,
+    FastTournamentEvaluator,
+    ParetoFrontier,
+)
 from mintok.mechanism_bench import run_all_mechanism_benchmarks
 from mintok.policybench import (
     IntermediateStateRecord,
     PolicyBenchDataset,
     PolicyBenchEvaluator,
 )
-from mintok.promotion_funnel import run_candidate_eval, run_dev_eval, run_release_eval
+from mintok.promotion_funnel import (
+    PromotionLineageRecord,
+    record_lineage,
+    run_candidate_eval,
+    run_dev_eval,
+    run_release_eval,
+)
 from mintok.replayer import TrajectoryReplayer
 
 scenarios("promotion_funnel.feature")
@@ -270,4 +286,153 @@ def then_worktree_reset(ctx):
     assert ctx["wt1"].exists()
     assert ctx["wt2"].exists()
     assert ctx["server_cfg"].temperature == 0.0
+
+
+@given("paired candidate and champion runs across FAST-12 tasks", target_fixture="ctx")
+def given_paired_fast12_runs():
+    runner = LocalStage3Runner()
+    cand_runs, _ = runner.run_local_fast_suite(tasks=FAST12_TASKS)
+    champ_runs = {
+        tid: {
+            "task_id": tid,
+            "repo": repo,
+            "category": cat,
+            "solved": True,
+            "tokens": 85_000,
+            "target_files": [f"{repo}/core.py"],
+            "tool_families": ["read", "edit", "verify"],
+            "failure_signature": "",
+            "patch_intent": f"fix_{cat}",
+            "verification_choices": ["pytest"],
+        }
+        for tid, repo, cat in FAST12_TASKS
+    }
+    return {"cand_runs": cand_runs, "champ_runs": champ_runs}
+
+
+@when("the behavioral divergence is computed")
+def when_compute_divergence(ctx):
+    div = compute_behavioral_divergence(ctx["cand_runs"], ctx["champ_runs"])
+    ctx["divergence"] = div
+
+
+@then("target file divergence, tool family divergence, and failure signature divergence are reported")
+def then_divergence_reported(ctx):
+    div = ctx["divergence"]
+    assert 0.0 <= div.target_file_divergence <= 1.0
+    assert 0.0 <= div.tool_family_divergence <= 1.0
+    assert 0.0 <= div.failure_signature_divergence <= 1.0
+
+
+@then("the overall behavioral divergence is within the acceptable threshold")
+def then_overall_divergence_acceptable(ctx):
+    assert ctx["divergence"].is_acceptable(0.35)
+
+
+@then("the adaptive task scheduler selects the next task with highest expected information gain")
+def then_adaptive_scheduler_selects():
+    scheduler = AdaptiveTaskScheduler()
+    completed = [
+        FastTaskResult(
+            task_id="fast-01-calc-bug",
+            category="localized_bug",
+            champion_solved=True,
+            candidate_solved=True,
+            champion_tokens=100_000,
+            candidate_tokens=70_000,
+            delta_s=0,
+            delta_t=-30_000,
+            delta_u=0.15,
+        )
+    ]
+    next_task = scheduler.select_next_task(completed, FAST_COVERAGE_TASKS)
+    assert next_task is not None
+    assert next_task[0] != "fast-01-calc-bug"
+
+
+@given("candidate policies with varying solve rates and token costs", target_fixture="ctx")
+def given_candidates_varying_rates():
+    frontier = ParetoFrontier()
+    frontier.update("control", solves=12, total_tasks=12, total_tokens=1_000_000, utility=0.0)
+    return {"frontier": frontier}
+
+
+@when("the candidates update the Pareto frontier")
+def when_update_pareto(ctx):
+    f = ctx["frontier"]
+    f.update("cand_econ", solves=11, total_tasks=12, total_tokens=500_000, utility=0.45)
+    f.update("cand_succ", solves=12, total_tasks=12, total_tokens=650_000, utility=0.55)
+
+
+@then("champion-economy, champion-success, and champion-balanced roles are populated")
+def then_champion_roles_populated(ctx):
+    f = ctx["frontier"]
+    assert f.get_champion("champion-economy") is not None
+    assert f.get_champion("champion-success") is not None
+    assert f.get_champion("champion-balanced") is not None
+
+
+@then("candidate promotion lineage is recorded")
+def then_lineage_recorded(tmp_path):
+    record = PromotionLineageRecord(
+        candidate_id="cand_test",
+        parent_champion_id="control",
+        timestamp="2026-09-30T12:00:00Z",
+        changed_modules=["compiler", "optimizer"],
+        parameters={"compression": 2.0},
+        dev_eval_verdict="PROCEED_TO_STAGE_4",
+        tournament_verdict="PROMOTE",
+        pareto_classification="champion-balanced",
+    )
+    lineage_file = tmp_path / "lineage.jsonl"
+    record_lineage(record, lineage_file=lineage_file)
+    assert lineage_file.exists()
+    assert "cand_test" in lineage_file.read_text(encoding="utf-8")
+
+
+@given("candidate runs containing synthetic or counterfactual markers", target_fixture="ctx")
+def given_synthetic_candidate_runs():
+    champ = {}
+    cand = {}
+    for i in range(1, 21):
+        tid = f"task_{i:02d}"
+        champ[tid] = {"solved": True, "tokens": 100_000, "synthetic": True}
+        cand[tid] = {"solved": True, "tokens": 50_000, "synthetic": True}
+    return {"champ": champ, "cand": cand}
+
+
+@given("an evaluation manifest claiming release evaluation")
+def given_release_eval_manifest(ctx):
+    ctx["manifest"] = {
+        "mintok_commit": "a471bcf",
+        "policy": "v3",
+        "system_prompt_hash": "a1b2c3d4e5f6",
+        "tool_schema_hash": "f6e5d4c3b2a1",
+        "pricing_table_hash": "9876543210ab",
+        "repo_commit": "c0ffee123456",
+        "is_counterfactual": False,
+        "synthetic": True,
+    }
+
+
+@then("the output renders the synthetic fixture warning banner")
+def then_renders_synthetic_banner(ctx):
+    rendered = ctx["release_report"].render_text()
+    assert "EXAMPLE OUTPUT — SYNTHETIC FIXTURE (NOT EMPIRICAL EVIDENCE)" in rendered
+
+
+@then("observed live evidence is strictly marked as false")
+def then_observed_live_evidence_false(ctx):
+    assert ctx["release_report"].observed_strictly is False
+    assert ctx["release_report"].is_synthetic is True
+    rendered = ctx["release_report"].render_text()
+    assert "Observed Live Evidence:       NO (SYNTHETIC FIXTURE / NOT EMPIRICAL)" in rendered
+    assert "Observed Live Evidence:       YES" not in rendered
+
+
+@when('running "mintok promote v3" via the CLI', target_fixture="ctx")
+def when_run_cli_promote(capsys):
+    ret = mintok_main(["promote", "v3"])
+    out = capsys.readouterr().out
+    return {"cli_ret": ret, "cli_out": out}
 

@@ -50,6 +50,7 @@ class IntermediateStateRecord:
     historical_action: str
     eventual_solve: bool
     remaining_tokens: int
+    task_family: str = "localization"
     expansion_required: bool = False
     frontier_call_necessary: bool = True
     solve_in_next_50k: bool = False
@@ -68,6 +69,7 @@ class IntermediateStateRecord:
             "historical_action": self.historical_action,
             "eventual_solve": self.eventual_solve,
             "remaining_tokens": self.remaining_tokens,
+            "task_family": self.task_family,
             "expansion_required": self.expansion_required,
             "frontier_call_necessary": self.frontier_call_necessary,
             "solve_in_next_50k": self.solve_in_next_50k,
@@ -76,6 +78,21 @@ class IntermediateStateRecord:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> IntermediateStateRecord:
         return cls(**data)
+
+
+@dataclass(frozen=True, slots=True)
+class FamilyEvaluationSummary:
+    """Grouped breakdown for one task family in PolicyBench."""
+
+    family: str
+    states_count: int
+    agreement_rate: float
+    mean_utility: float
+    mean_regret: float
+    frontier_avoidance_rate: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +110,7 @@ class ControllerStateEvaluationResult:
     utility_score: float
     regret: float
     agreement: bool
+    task_family: str = "localization"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +126,7 @@ class PolicyBenchSummary:
     expansion_accuracy: float
     frontier_avoidance_rate: float
     solve_next_50k_brier: float
+    family_summaries: dict[str, FamilyEvaluationSummary] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,12 +139,13 @@ class PolicyBenchSummary:
             "expansion_accuracy": round(self.expansion_accuracy, 4),
             "frontier_avoidance_rate": round(self.frontier_avoidance_rate, 4),
             "solve_next_50k_brier": round(self.solve_next_50k_brier, 4),
+            "family_summaries": {k: v.to_dict() for k, v in self.family_summaries.items()},
         }
 
     def render_text(self) -> str:
         lines = [
-            f"PolicyBench Intermediate State Evaluation ({self.total_states} states)",
-            "-" * 65,
+            f"PolicyBench Intermediate State Evaluation ({self.total_states:,} states)",
+            "-" * 68,
             f"Action Agreement Rate:       {self.agreement_rate * 100:>11.1f}%",
             f"Mean Expected Utility:       {self.mean_utility:>12.4f}",
             f"Mean Policy Regret:          {self.mean_regret:>12.4f}",
@@ -134,8 +154,19 @@ class PolicyBenchSummary:
             f"Expansion Accuracy:          {self.expansion_accuracy * 100:>11.1f}%",
             f"Frontier Avoidance Rate:     {self.frontier_avoidance_rate * 100:>11.1f}%",
             f"Solve in 50k Brier Score:    {self.solve_next_50k_brier:>12.4f}",
-            "-" * 65,
+            "-" * 68,
         ]
+        if self.family_summaries:
+            lines.extend([
+                "TASK FAMILY BREAKDOWN:",
+                f"{'Family':<20} {'States':>8} {'Agreement':>12} {'Regret':>10} {'Avoidance':>12}",
+                "-" * 68,
+            ])
+            for fam, s in self.family_summaries.items():
+                lines.append(
+                    f"{fam:<20} {s.states_count:>8,d} {s.agreement_rate * 100:>11.1f}% {s.mean_regret:>10.4f} {s.frontier_avoidance_rate * 100:>11.1f}%"
+                )
+            lines.append("-" * 68)
         return "\n".join(lines)
 
 
@@ -283,6 +314,7 @@ class PolicyBenchEvaluator:
             utility_score=best_q,
             regret=regret,
             agreement=agreement,
+            task_family=state.task_family,
         )
 
     def evaluate_dataset(self, dataset: PolicyBenchDataset) -> PolicyBenchSummary:
@@ -319,6 +351,23 @@ class PolicyBenchEvaluator:
             for r, s in zip(results, dataset.states)
         ) / n
 
+        # Group by task family
+        fam_buckets: dict[str, list[ControllerStateEvaluationResult]] = {}
+        for r in results:
+            fam_buckets.setdefault(r.task_family, []).append(r)
+
+        family_summaries: dict[str, FamilyEvaluationSummary] = {}
+        for fam, group in fam_buckets.items():
+            g_n = len(group)
+            family_summaries[fam] = FamilyEvaluationSummary(
+                family=fam,
+                states_count=g_n,
+                agreement_rate=sum(1 for g in group if g.agreement) / g_n,
+                mean_utility=sum(g.utility_score for g in group) / g_n,
+                mean_regret=sum(g.regret for g in group) / g_n,
+                frontier_avoidance_rate=sum(1 for g in group if g.frontier_call_prob_pred < 0.5) / g_n,
+            )
+
         return PolicyBenchSummary(
             total_states=n,
             agreement_rate=agreement_count / n,
@@ -329,4 +378,98 @@ class PolicyBenchEvaluator:
             expansion_accuracy=exp_correct / n,
             frontier_avoidance_rate=frontier_avoided / n,
             solve_next_50k_brier=brier_50k,
+            family_summaries=family_summaries,
         )
+
+
+TASK_FAMILIES: tuple[str, ...] = (
+    "localization",
+    "verification",
+    "runtime_debugging",
+    "cross_file",
+    "monorepo",
+    "refactor",
+    "api_propagation",
+)
+
+REPOSITORIES: tuple[str, ...] = (
+    "django",
+    "sympy",
+    "scikit-learn",
+    "flask",
+    "requests",
+    "azure-cli",
+    "pytest-dev",
+    "pandas",
+    "fastapi",
+    "numpy",
+)
+
+
+def generate_default_policybench_dataset(target_states: int = 1050) -> PolicyBenchDataset:
+    """Generate a high-density PolicyBench dataset with >= 1,000 states across 100+ tasks and 7 families."""
+    dataset = PolicyBenchDataset()
+    turns_per_task = 7
+    tasks_count = max(100, target_states // turns_per_task)
+
+    action_seq = [
+        ("grep", "finding symbol definition"),
+        ("inspect", "examining function interface and body"),
+        ("runtime-diagnose", "parsing stacktrace and frame error"),
+        ("macro-action", "applying structured symbol replacement"),
+        ("verify", "running targeted test subset"),
+        ("macro-action", "adjusting patch diff"),
+        ("verify", "running complete acceptance verification"),
+    ]
+
+    for t_idx in range(1, tasks_count + 1):
+        repo = REPOSITORIES[t_idx % len(REPOSITORIES)]
+        fam = TASK_FAMILIES[t_idx % len(TASK_FAMILIES)]
+        task_id = f"{repo}_task_{t_idx:03d}"
+        eventual_solve = (t_idx % 3 != 0)  # 67% baseline solve rate
+        total_task_tokens = 45_000 + (t_idx % 10) * 8_000
+
+        spent = 0
+        for turn_idx, (act, intent) in enumerate(action_seq, 1):
+            toks = 2_000 + (turn_idx * 1_200) + ((t_idx * 31) % 1_500)
+            spent += toks
+            remaining = max(0, total_task_tokens - spent)
+
+            has_patch = turn_idx >= 4
+            has_fail = turn_idx in (2, 3)
+            current_patch = f"diff --git a/{repo}/core.py b/{repo}/core.py\n+ # fix {task_id}" if has_patch else ""
+            current_fail = f"AssertionError: test_case_{task_id} failed" if has_fail else ""
+
+            exp_req = (turn_idx == 3) or (fam == "monorepo" and turn_idx == 2)
+            frontier_nec = act not in ("runtime-diagnose", "verify") or has_fail
+            solve_50k = eventual_solve and (remaining <= 50_000)
+
+            rec = IntermediateStateRecord(
+                task_id=task_id,
+                turn_index=turn_idx,
+                repo_name=repo,
+                repo_features={
+                    "complexity": 0.4 + (turn_idx * 0.05),
+                    "packages_count": 1 if repo != "azure-cli" else 12,
+                    "task_family": fam,
+                },
+                current_state=f"turn_{turn_idx}_{act}",
+                tokens_spent=spent,
+                current_patch=current_patch,
+                current_failure=current_fail,
+                available_actions=["virtualized-shell", "semantic-compiler", "macro-action", "verify", "abort"],
+                historical_action=act,
+                eventual_solve=eventual_solve,
+                remaining_tokens=remaining,
+                task_family=fam,
+                expansion_required=exp_req,
+                frontier_call_necessary=frontier_nec,
+                solve_in_next_50k=solve_50k,
+            )
+            dataset.add(rec)
+            if len(dataset) >= target_states:
+                break
+        if len(dataset) >= target_states:
+            break
+
+    return dataset

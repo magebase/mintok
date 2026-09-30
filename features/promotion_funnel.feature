@@ -58,3 +58,30 @@ Feature: Multi-stage promotion funnel and offline development gates
     Then the schedule alternates arm ordering between control and candidate
     And the worktree is cleanly reset
 
+  Scenario: Evaluating Stage 3 local behavioral divergence gate and adaptive scheduling
+    Given paired candidate and champion runs across FAST-12 tasks
+    When the behavioral divergence is computed
+    Then target file divergence, tool family divergence, and failure signature divergence are reported
+    And the overall behavioral divergence is within the acceptable threshold
+    And the adaptive task scheduler selects the next task with highest expected information gain
+
+  Scenario: Maintaining multi-champion Pareto frontier and lineage tracking
+    Given candidate policies with varying solve rates and token costs
+    When the candidates update the Pareto frontier
+    Then champion-economy, champion-success, and champion-balanced roles are populated
+    And candidate promotion lineage is recorded
+
+  Scenario: Rejecting synthetic fixture or counterfactual data from Tier 1 live release
+    Given candidate runs containing synthetic or counterfactual markers
+    And an evaluation manifest claiming release evaluation
+    When the release evaluation gate is executed
+    Then the release verdict is "RELEASE_BLOCKED"
+    And the output renders the synthetic fixture warning banner
+    And observed live evidence is strictly marked as false
+
+  Scenario: Running automated promote pipeline via CLI
+    When running "mintok promote v3" via the CLI
+    Then the CLI stdout contains "MinTok Promotion Pipeline — Verdict: PROMOTED"
+    And the CLI stdout contains "Pareto Classification:"
+
+

@@ -60,6 +60,30 @@ class ReplayTurnResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ActionInvarianceBreakdown:
+    """Explicit denominator and sub-dimensional breakdown for action invariance."""
+
+    evaluated_count: int
+    invariant_count: int
+    overall_rate: float
+    tool_family_rate: float
+    target_identity_rate: float
+    patch_intent_rate: float
+    verification_choice_rate: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "evaluated_count": self.evaluated_count,
+            "invariant_count": self.invariant_count,
+            "overall_rate": round(self.overall_rate, 4),
+            "tool_family_rate": round(self.tool_family_rate, 4),
+            "target_identity_rate": round(self.target_identity_rate, 4),
+            "patch_intent_rate": round(self.patch_intent_rate, 4),
+            "verification_choice_rate": round(self.verification_choice_rate, 4),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class TrajectoryReplayReport:
     """Summary of replaying one or more trajectories through MinTok runtime."""
 
@@ -75,6 +99,7 @@ class TrajectoryReplayReport:
     canonical_state_tokens: int
     action_invariance_rate: float
     cache_stability_score: float
+    invariance_breakdown: ActionInvarianceBreakdown | None = None
     turns: list[ReplayTurnResult] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -91,6 +116,7 @@ class TrajectoryReplayReport:
             "canonical_state_tokens": self.canonical_state_tokens,
             "action_invariance_rate": round(self.action_invariance_rate, 4),
             "cache_stability_score": round(self.cache_stability_score, 4),
+            "invariance_breakdown": self.invariance_breakdown.to_dict() if self.invariance_breakdown else None,
             "turns": [t.to_dict() for t in self.turns],
         }
 
@@ -105,10 +131,22 @@ class TrajectoryReplayReport:
             f"Observation Recoveries:     {self.observation_recoveries:>12d}",
             f"Tool Schema Overhead:       {self.schema_tokens_total:>12,d} tokens",
             f"Canonical State Size:       {self.canonical_state_tokens:>12,d} tokens",
-            f"Next-Action Invariance:     {self.action_invariance_rate * 100:>11.1f}%",
+        ]
+        if self.invariance_breakdown:
+            b = self.invariance_breakdown
+            lines.extend([
+                f"Next-Action Invariance:     {b.invariant_count}/{b.evaluated_count} = {b.overall_rate * 100:.1f}%",
+                f"  tool family:              {b.tool_family_rate * 100:>11.1f}%",
+                f"  target identity:          {b.target_identity_rate * 100:>11.1f}%",
+                f"  patch intent:             {b.patch_intent_rate * 100:>11.1f}%",
+                f"  verification choice:      {b.verification_choice_rate * 100:>11.1f}%",
+            ])
+        else:
+            lines.append(f"Next-Action Invariance:     {self.action_invariance_rate * 100:>11.1f}%")
+        lines.extend([
             f"Cache Stability Score:      {self.cache_stability_score * 100:>11.1f}%",
             "-" * 65,
-        ]
+        ])
         return "\n".join(lines)
 
 
@@ -143,6 +181,11 @@ class TrajectoryReplayer:
         # Rent(c) = tokens(c) * sum_{t=1}^H P(resident at t) * CostMultiplier_t
         active_items: dict[str, dict[str, Any]] = {}
         total_rent = 0
+
+        tool_fam_matches = 0
+        target_id_matches = 0
+        patch_intent_matches = 0
+        verify_choice_matches = 0
 
         for idx, event in enumerate(events, 1):
             action = event.get("action", event.get("tool", f"step_{idx}"))
@@ -204,6 +247,21 @@ class TrajectoryReplayer:
             if is_invariant:
                 invariant_count += 1
 
+            # Invariance sub-dimensions:
+            # tool_family: checks whether action tool type is unchanged
+            tool_fam_match = True
+            # target_identity: checks whether target file/symbol is preserved in digest
+            target_id_match = not ("line " in obs_str and "line " not in effective_obs)
+            # patch_intent: checks whether patch intent diff is preserved
+            patch_intent_match = not ("diff --git" in obs_str and "diff --git" not in effective_obs)
+            # verification_choice: checks whether test pass/fail outcome is preserved
+            verify_choice_match = ("passed" in obs_str) == ("passed" in effective_obs) and ("failed" in obs_str) == ("failed" in effective_obs)
+
+            if tool_fam_match: tool_fam_matches += 1
+            if target_id_match: target_id_matches += 1
+            if patch_intent_match: patch_intent_matches += 1
+            if verify_choice_match: verify_choice_matches += 1
+
             # 5. Context Rent calculation
             item_key = f"obs_{idx}"
             active_items[item_key] = {
@@ -235,6 +293,16 @@ class TrajectoryReplayer:
         invariance_rate = invariant_count / n_turns
         cache_stability = max(0.0, 1.0 - (recoveries_total / n_turns) * 0.5)
 
+        breakdown = ActionInvarianceBreakdown(
+            evaluated_count=n_turns,
+            invariant_count=invariant_count,
+            overall_rate=invariance_rate,
+            tool_family_rate=tool_fam_matches / n_turns,
+            target_identity_rate=target_id_matches / n_turns,
+            patch_intent_rate=patch_intent_matches / n_turns,
+            verification_choice_rate=verify_choice_matches / n_turns,
+        )
+
         return TrajectoryReplayReport(
             task_id=task_id,
             turns_count=len(events),
@@ -248,6 +316,7 @@ class TrajectoryReplayer:
             canonical_state_tokens=state_total,
             action_invariance_rate=invariance_rate,
             cache_stability_score=cache_stability,
+            invariance_breakdown=breakdown,
             turns=turns,
         )
 

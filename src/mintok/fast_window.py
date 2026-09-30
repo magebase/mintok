@@ -29,7 +29,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
-FAST12_TASKS: tuple[tuple[str, str, str], ...] = (
+FAST_COVERAGE_TASKS: tuple[tuple[str, str, str], ...] = (
     ("fast-01-calc-bug", "calculator", "localized_bug"),
     ("fast-02-api-prop", "webledger", "api_propagation"),
     ("fast-03-cross-file", "shopcart", "cross_file_defect"),
@@ -43,9 +43,123 @@ FAST12_TASKS: tuple[tuple[str, str, str], ...] = (
     ("fast-11-dep-upgrade", "spectree", "dependency_upgrade"),
     ("fast-12-compaction", "sepal-ui", "state_compaction_stress"),
 )
+FAST12_TASKS = FAST_COVERAGE_TASKS
 
-FAST8_SUBSET_IDS = frozenset(t[0] for t in FAST12_TASKS[:8])
-FAST12_IDS = frozenset(t[0] for t in FAST12_TASKS)
+FAST_ADVERSARIAL_TASKS: tuple[tuple[str, str, str], ...] = (
+    ("adv-01-deep-recurse", "ast-engine", "infinite_loop_trap"),
+    ("adv-02-unicode-boundary", "tokenizer", "unicode_normalization_trap"),
+    ("adv-03-state-explosion", "symbol-table", "state_explosion"),
+    ("adv-04-noisy-test-log", "test-runner", "pathological_log_verbosity"),
+    ("adv-05-circular-dep", "dep-resolver", "circular_dependency"),
+    ("adv-06-ghost-failure", "flaky-suite", "flaky_verification"),
+    ("adv-07-ambiguous-symbol", "multi-module", "duplicate_symbol_shadowing"),
+    ("adv-08-massive-diff", "migration", "large_scale_hunk_sprawl"),
+)
+
+FAST8_SUBSET_IDS = frozenset(t[0] for t in FAST_COVERAGE_TASKS[:8])
+FAST12_IDS = frozenset(t[0] for t in FAST_COVERAGE_TASKS)
+
+
+def get_fast_window(
+    fixed_count: int = 8,
+    rotating_count: int = 4,
+    rotation_seed: int = 0,
+) -> list[tuple[str, str, str]]:
+    """Return a combined FAST window of fixed coverage tasks plus deterministic rotating tasks."""
+    fixed = list(FAST_COVERAGE_TASKS[:fixed_count])
+    rotating_pool = list(FAST_COVERAGE_TASKS[fixed_count:]) + list(FAST_ADVERSARIAL_TASKS)
+    if not rotating_pool or rotating_count <= 0:
+        return fixed
+    rotated: list[tuple[str, str, str]] = []
+    pool_len = len(rotating_pool)
+    for i in range(rotating_count):
+        idx = (rotation_seed + i) % pool_len
+        rotated.append(rotating_pool[idx])
+    return fixed + rotated
+
+
+class AdaptiveTaskScheduler:
+    """Active dynamic task selection maximizing expected information gain about promotion."""
+
+    CATEGORY_INFORMATION_WEIGHTS: dict[str, float] = {
+        "state_compaction_stress": 2.0,
+        "monorepo_navigation": 1.9,
+        "infinite_loop_trap": 1.9,
+        "state_explosion": 1.8,
+        "cross_file_defect": 1.7,
+        "large_scale_hunk_sprawl": 1.7,
+        "api_propagation": 1.6,
+        "semantic_trap": 1.6,
+        "circular_dependency": 1.5,
+        "runtime_traceback": 1.4,
+        "test_harness_complexity": 1.4,
+        "pathological_log_verbosity": 1.3,
+        "refactor": 1.3,
+        "schema_data_shape_change": 1.2,
+        "dependency_upgrade": 1.2,
+        "flaky_verification": 1.1,
+        "duplicate_symbol_shadowing": 1.1,
+        "unicode_normalization_trap": 1.1,
+        "large_file": 1.1,
+        "localized_bug": 1.0,
+    }
+
+    def __init__(
+        self,
+        solve_value: float = 1.0,
+        token_lambda: float = 0.000005,
+    ) -> None:
+        self.solve_value = solve_value
+        self.token_lambda = token_lambda
+
+    def compute_task_information_gain(
+        self,
+        task: tuple[str, str, str],
+        completed_results: Sequence[FastTaskResult],
+    ) -> float:
+        """Compute expected information gain E[info] for evaluating a given task next."""
+        tid, repo, cat = task
+        completed_tids = {r.task_id for r in completed_results}
+        if tid in completed_tids:
+            return 0.0
+
+        base_weight = self.CATEGORY_INFORMATION_WEIGHTS.get(cat, 1.0)
+
+        # Novelty: penalize categories already heavily represented
+        cat_count = sum(1 for r in completed_results if r.category == cat)
+        novelty_mult = 1.0 / (1.0 + cat_count * 0.5)
+
+        # Decision boundary proximity
+        cand_solves = sum(1 for r in completed_results if r.candidate_solved)
+        champ_solves = sum(1 for r in completed_results if r.champion_solved)
+        solve_delta = cand_solves - champ_solves
+
+        if solve_delta == -1:
+            boundary_sensitivity = 2.0  # Critical decision threshold
+        elif solve_delta == 0:
+            boundary_sensitivity = 1.5
+        elif solve_delta <= -2:
+            boundary_sensitivity = 0.5  # Already killed
+        else:
+            boundary_sensitivity = 1.2
+
+        champ_tokens = sum(r.champion_tokens for r in completed_results)
+        cand_tokens = sum(r.candidate_tokens for r in completed_results)
+        token_ratio = (cand_tokens / max(1, champ_tokens)) if champ_tokens > 0 else 1.0
+        token_sensitivity = 1.0 + max(0.0, 1.0 - abs(token_ratio - 0.80) * 2.0)
+
+        return base_weight * novelty_mult * boundary_sensitivity * token_sensitivity
+
+    def select_next_task(
+        self,
+        completed_results: Sequence[FastTaskResult],
+        candidate_pool: Sequence[tuple[str, str, str]],
+    ) -> tuple[str, str, str] | None:
+        """Select task t* = argmax_t E[information about promotion decision]."""
+        remaining = [t for t in candidate_pool if t[0] not in {r.task_id for r in completed_results}]
+        if not remaining:
+            return None
+        return max(remaining, key=lambda t: self.compute_task_information_gain(t, completed_results))
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,20 +369,102 @@ def compute_control_cache_key(
     task_id: str,
     repo_hash: str,
     model: str,
-    model_config: dict[str, Any],
-    system_prompt_hash: str,
-    tool_schema_hash: str,
-    harness_commit: str,
+    model_config: dict[str, Any] | None = None,
+    system_prompt_hash: str = "",
+    tool_schema_hash: str = "",
+    harness_commit: str = "",
+    provider: str = "",
+    api_version: str = "",
+    reasoning_effort: str = "",
+    temperature: float = 0.0,
+    max_output: int = 4096,
+    instructions_hash: str = "",
+    environment_image: str = "",
 ) -> str:
     """Strongly key frozen Control runs by all generation and environment influences."""
     payload = {
         "task_id": task_id,
         "repo_hash": repo_hash,
         "model": model,
-        "model_config": model_config,
+        "model_config": model_config or {},
         "system_prompt_hash": system_prompt_hash,
         "tool_schema_hash": tool_schema_hash,
         "harness_commit": harness_commit,
+        "provider": provider,
+        "api_version": api_version,
+        "reasoning_effort": reasoning_effort,
+        "temperature": temperature,
+        "max_output": max_output,
+        "instructions_hash": instructions_hash,
+        "environment_image": environment_image,
     }
     raw = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+
+@dataclass
+class ParetoFrontier:
+    """Maintains multi-champion Pareto frontier across economy, balanced, and success axes."""
+
+    champions: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def update(
+        self,
+        candidate_id: str,
+        solves: int,
+        total_tasks: int,
+        total_tokens: int,
+        utility: float,
+        metadata: dict[str, Any] | None = None,
+    ) -> list[str]:
+        """Update frontier with candidate and return list of champion titles won."""
+        titles_won: list[str] = []
+        entry = {
+            "candidate_id": candidate_id,
+            "solves": solves,
+            "total_tasks": total_tasks,
+            "solve_rate": solves / max(1, total_tasks),
+            "total_tokens": total_tokens,
+            "utility": utility,
+            "metadata": metadata or {},
+        }
+
+        # 1. champion-success: strictly maximum solves (tiebreaker: lower tokens)
+        curr_succ = self.champions.get("champion-success")
+        if (
+            curr_succ is None
+            or solves > curr_succ["solves"]
+            or (solves == curr_succ["solves"] and total_tokens < curr_succ["total_tokens"])
+        ):
+            self.champions["champion-success"] = entry
+            titles_won.append("champion-success")
+
+        # 2. champion-economy: minimum tokens among candidates that maintain acceptable solve rate
+        curr_econ = self.champions.get("champion-economy")
+        econ_qualifies = (solves / max(1, total_tasks)) >= 0.70
+        if econ_qualifies:
+            if curr_econ is None or total_tokens < curr_econ["total_tokens"]:
+                self.champions["champion-economy"] = entry
+                titles_won.append("champion-economy")
+
+        # 3. champion-balanced: maximum utility
+        curr_bal = self.champions.get("champion-balanced")
+        if curr_bal is None or utility > curr_bal["utility"]:
+            self.champions["champion-balanced"] = entry
+            titles_won.append("champion-balanced")
+
+        return titles_won
+
+    def get_champion(self, role: str) -> dict[str, Any] | None:
+        return self.champions.get(role)
+
+    def is_pareto_dominant(self, solves: int, total_tokens: int) -> bool:
+        """Check if (solves, total_tokens) is non-dominated by existing champions."""
+        for role, c in self.champions.items():
+            if c["solves"] >= solves and c["total_tokens"] <= total_tokens:
+                if c["solves"] > solves or c["total_tokens"] < total_tokens:
+                    return False
+        return True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: dict(v) for k, v in self.champions.items()}
