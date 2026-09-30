@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from mintok.cli import main as mintok_main
+from mintok.controller import PolicyBenchRecord, StateFeatures
 from mintok.repo_profile import RepoProfile, scan_repo_profile
 from mintok.tokens import estimate_tokens
 
@@ -158,4 +160,78 @@ def then_associates_test_symbol(ctx, test: str, symbol: str):
 def then_co_change_connects(ctx, f1: str, f2: str):
     assert f2 in ctx["profile"].co_change_graph[f1]
     assert f1 in ctx["profile"].co_change_graph[f2]
+
+
+@when('running "mintok repo-profile" on the repository')
+def when_run_cli_repo_profile(ctx, capsys):
+    ret = mintok_main(["repo-profile", str(ctx["root"])])
+    out = capsys.readouterr().out
+    ctx["cli_ret"] = ret
+    ctx["cli_out"] = out
+
+
+@then(parsers.parse('the CLI stdout contains "{text}"'))
+def then_cli_stdout_contains(ctx, text: str):
+    assert text in ctx["cli_out"]
+
+
+@given("a PolicyBench JSONL file with 2 state records", target_fixture="ctx")
+def given_policybench_jsonl(tmp_path: Path):
+    f1 = StateFeatures(
+        repo_packages=2,
+        repo_complexity=0.3,
+        task_issue_length=400,
+        task_named_symbols=1,
+        tokens_spent=30000,
+        turns_elapsed=3,
+        active_failures=1,
+        verified_facts_count=2,
+        has_patch=1,
+        candidate_action="virtualized-shell",
+        repo_name="calc_repo",
+    )
+    r1 = PolicyBenchRecord(
+        task_id="task_1",
+        turn_index=3,
+        features=f1,
+        action_taken="virtualized-shell",
+        cost_tokens=25000,
+        verified_progress=True,
+        eventual_success=True,
+    )
+    f2 = StateFeatures(
+        repo_packages=4,
+        repo_complexity=0.7,
+        task_issue_length=900,
+        task_named_symbols=3,
+        tokens_spent=80000,
+        turns_elapsed=8,
+        active_failures=2,
+        verified_facts_count=1,
+        has_patch=0,
+        candidate_action="semantic-compiler",
+        repo_name="complex_repo",
+    )
+    r2 = PolicyBenchRecord(
+        task_id="task_2",
+        turn_index=8,
+        features=f2,
+        action_taken="semantic-compiler",
+        cost_tokens=40000,
+        verified_progress=False,
+        eventual_success=False,
+    )
+    jsonl_path = tmp_path / "policybench.jsonl"
+    with open(jsonl_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(r1.to_dict()) + "\n")
+        f.write(json.dumps(r2.to_dict()) + "\n")
+    return {"jsonl_path": jsonl_path}
+
+
+@when('running "mintok shadow-eval" on the records')
+def when_run_cli_shadow_eval(ctx, capsys):
+    ret = mintok_main(["shadow-eval", str(ctx["jsonl_path"])])
+    out = capsys.readouterr().out
+    ctx["cli_ret"] = ret
+    ctx["cli_out"] = out
 

@@ -58,3 +58,21 @@ Feature: Repository execution profiles and complexity priors
     And a co-change is recorded between "azure/cli/auth.py" and "azure/cli/session.py"
     Then the profile associates "tests/test_auth.py" with symbol "authenticate"
     And the co-change graph connects "azure/cli/auth.py" and "azure/cli/session.py"
+
+  Scenario: Scanning repository profile via CLI
+    Given a repository with structure:
+      """
+      pyproject.toml
+      src/calc/__init__.py
+      src/calc/core.py
+      tests/test_calc.py
+      """
+    When running "mintok repo-profile" on the repository
+    Then the CLI stdout contains "package_manager: pyproject"
+    And the CLI stdout contains "test_command: pytest"
+
+  Scenario: Evaluating shadow policy dataset via CLI
+    Given a PolicyBench JSONL file with 2 state records
+    When running "mintok shadow-eval" on the records
+    Then the CLI stdout contains "Shadow Policy Evaluation (2 turns):"
+    And the CLI stdout contains "Agreement Rate:"

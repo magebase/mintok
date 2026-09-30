@@ -221,7 +221,7 @@ def run_live_task(
     model: str,
     provider: str = "openrouter",
     resume: bool = True,
-    mintok_policy: str = "adaptive",
+    mintok_policy: str = "v3",
 ) -> tuple[PublicRunRecord, dict[str, Any]]:
     """Run one live arm on one real SWE-rebench task."""
     tid = task["instance_id"]
@@ -379,7 +379,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="run_live_swe_rebench")
     parser.add_argument("--window", default="swe_rebench_window_eval_50.json.gz", help="Window filename or path")
     parser.add_argument("--model", default="stealth/space-bunny-alpha")
-    parser.add_argument("--mintok-policy", default="adaptive", choices=["adaptive", "S", "C"], help="Policy for MinTok arm")
+    parser.add_argument(
+        "--mintok-policy",
+        default="v3",
+        choices=["v3", "adaptive", "S", "C", "v3_v", "v3_vc", "v3_vcr", "v3_vcrm", "v3_vcrmp"],
+        help="Policy for MinTok arm",
+    )
     parser.add_argument("--offset", type=int, default=0, help="Offset into selected tasks")
     parser.add_argument("--limit", type=int, default=None, help="Number of tasks to evaluate")
     parser.add_argument("--provider", default="openrouter")

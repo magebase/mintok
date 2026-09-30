@@ -131,7 +131,7 @@ def get_or_create_repo_profile(root: Path, cache_dir: Path | None = None) -> Rep
 
 def scan_repo_profile(root: Path, repo_name: str | None = None) -> RepoProfile:
     """Scan a repository directory and construct its RepoProfile."""
-    name = repo_name or root.name
+    name = repo_name or (root.resolve().name if not root.name or root.name == "." else root.name)
     files: list[Path] = []
     dirs: set[str] = set()
     packages: list[str] = []

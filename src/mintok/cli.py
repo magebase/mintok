@@ -78,6 +78,16 @@ def build_parser() -> argparse.ArgumentParser:
     repro.add_argument("--model", default="qwen/qwen-2.5-coder-32b-instruct")
     repro.add_argument("--quick", action="store_true", help="run 10-task subset for fast verification")
     repro.add_argument("--out", type=Path, default=None, help="write report JSON to this file")
+
+    rp = sub.add_parser("repo-profile", help="scan repository and output execution profile and topology")
+    rp.add_argument("root", type=Path)
+    rp.add_argument("--format", choices=("text", "json"), default="text")
+
+    se = sub.add_parser("shadow-eval", help="evaluate candidate shadow controller against PolicyBench records")
+    se.add_argument("records", type=Path, help="path to JSONL PolicyBench records")
+    se.add_argument("--solve-value", type=float, default=1.0)
+    se.add_argument("--token-lambda", type=float, default=0.000005)
+    se.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
@@ -142,6 +152,42 @@ def main(argv: list[str] | None = None) -> int:
             output_path=args.out,
         )
         return 0 if passed else 1
+
+    if args.command == "repo-profile":
+        from mintok.repo_profile import scan_repo_profile
+
+        profile = scan_repo_profile(args.root)
+        if args.format == "json":
+            print(json.dumps(profile.to_dict(), indent=2))
+        else:
+            print(profile.render_context())
+        return 0
+
+    if args.command == "shadow-eval":
+        from mintok.controller import CalibratedLocalController, PolicyBenchRecord, ShadowPolicyEvaluator
+
+        records: list[PolicyBenchRecord] = []
+        for line in args.records.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                records.append(PolicyBenchRecord.from_dict(json.loads(line)))
+        controller = CalibratedLocalController(solve_value=args.solve_value, token_lambda=args.token_lambda)
+        evaluator = ShadowPolicyEvaluator(controller)
+        res = evaluator.evaluate_dataset(records)
+        if args.format == "json":
+            res_dict = {
+                "total": res["total"],
+                "agreement_rate": res["agreement_rate"],
+                "net_token_delta": res["net_token_delta"],
+                "net_success_delta": res["net_success_delta"],
+                "evaluations": [e.to_dict() for e in res["evaluations"]],
+            }
+            print(json.dumps(res_dict, indent=2))
+        else:
+            print(f"Shadow Policy Evaluation ({res['total']} turns):")
+            print(f"  Agreement Rate:    {res['agreement_rate'] * 100:.1f}%")
+            print(f"  Net Token Delta:   {res['net_token_delta']:+,.0f} tokens")
+            print(f"  Net Success Delta: {res['net_success_delta']:+.4f}")
+        return 0
 
     ir = compile_repository(args.root)
     for diagnostic in ir.diagnostics:
