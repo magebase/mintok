@@ -189,11 +189,21 @@ def compress_pytest(output: str, exit_code: int = 0) -> tuple[str, dict[str, Any
     assertions: list[str] = []
     summary_line = ""
 
+    test_files: list[str] = []
     # Parse failure summaries
     for line in lines:
         sline = line.strip()
+        for tok in re.findall(r"[\w./-]+\.py\b", sline):
+            if tok not in test_files:
+                test_files.append(tok)
         if sline.startswith("FAILED ") and " - " in sline:
             target = sline.split(" - ")[0].replace("FAILED ", "").strip()
+            failing_tests.append(target)
+        elif sline.startswith("FAILED "):
+            target = sline.replace("FAILED ", "").strip()
+            failing_tests.append(target)
+        elif "::" in sline and "FAILED" in sline:
+            target = sline.split()[0]
             failing_tests.append(target)
         elif sline.startswith("E   ") or sline.startswith("AssertionError:"):
             assertions.append(sline)
@@ -212,21 +222,33 @@ def compress_pytest(output: str, exit_code: int = 0) -> tuple[str, dict[str, Any
         "primary_assertion": primary_assertion,
         "summary": summary_line,
         "exit_code": exit_code or (1 if failing_tests else 0),
+        "test_files": test_files,
     }
 
     sig_hash = hashlib.sha256((primary_test + primary_assertion).encode("utf-8")).hexdigest()[:8]
     meta["signature_hash"] = sig_hash
 
-    summary_text = (
-        f"test run: exit={meta['exit_code']} failed={len(failing_tests)}\n"
-        f"primary failure:\n"
-        f"  {primary_test}\n"
-    )
-    if primary_assertion:
-        summary_text += f"  {primary_assertion}\n"
-    if summary_line:
-        summary_text += f"summary: {summary_line}\n"
-    summary_text += f"failure signature: {sig_hash}"
+    if failing_tests:
+        summary_text = (
+            f"test run: exit={meta['exit_code']} failed={len(failing_tests)}\n"
+            f"primary failure:\n"
+            f"  {primary_test}\n"
+        )
+        if primary_assertion:
+            summary_text += f"  {primary_assertion}\n"
+        if summary_line:
+            summary_text += f"summary: {summary_line}\n"
+        summary_text += f"failure signature: {sig_hash}"
+    else:
+        suite_info = f" ({', '.join(test_files[:2])})" if test_files else ""
+        summary_text = (
+            f"test run: exit=0 failed=0{suite_info}\n"
+            f"status: all tests passed\n"
+        )
+        if summary_line:
+            summary_text += f"summary: {summary_line}\n"
+        summary_text += f"pass signature: {sig_hash}"
+
     return summary_text, meta
 
 

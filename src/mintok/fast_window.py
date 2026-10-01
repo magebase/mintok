@@ -59,6 +59,132 @@ FAST_ADVERSARIAL_TASKS: tuple[tuple[str, str, str], ...] = (
 FAST8_SUBSET_IDS = frozenset(t[0] for t in FAST_COVERAGE_TASKS[:8])
 FAST12_IDS = frozenset(t[0] for t in FAST_COVERAGE_TASKS)
 
+FAST8_INITIAL_TASKS: tuple[tuple[str, str, str], ...] = (
+    ("fast-01-calc-bug", "calculator", "localized_bug"),
+    ("fast-01b-string-format", "formatter", "localized_bug"),
+    ("fast-03-cross-file", "shopcart", "cross_file_defect"),
+    ("fast-05-runtime-tb", "telemetry", "runtime_traceback"),
+    ("fast-06-monorepo", "azure-cli", "monorepo_navigation"),
+    ("fast-02-api-prop", "webledger", "api_propagation"),
+    ("fast-07-test-harness", "pytest-runner", "test_harness_complexity"),
+    ("fast-12-compaction", "sepal-ui", "state_compaction_stress"),
+)
+
+# Frozen 12-task stratified set: 6 categories x 2 tasks
+FAST12_STRATIFIED_FROZEN_SET: tuple[tuple[str, str, str], ...] = (
+    # 1. small/localized (2)
+    ("fast-01-calc-bug", "calculator", "small_localized"),
+    ("fast-01b-string-format", "formatter", "small_localized"),
+    # 2. cross-file (2)
+    ("fast-03-cross-file", "shopcart", "cross_file"),
+    ("fast-03b-multi-import", "importer", "cross_file"),
+    # 3. large-module (2)
+    ("fast-04-large-nav", "biglib", "large_module"),
+    ("fast-04b-deep-method", "datacore", "large_module"),
+    # 4. test/debugging (2)
+    ("fast-05-runtime-tb", "telemetry", "test_debugging"),
+    ("fast-07-test-harness", "pytest-runner", "test_debugging"),
+    # 5. API/schema (2)
+    ("fast-02-api-prop", "webledger", "api_schema"),
+    ("fast-09-schema-change", "notesrv", "api_schema"),
+    # 6. historically difficult/failure cases (2)
+    ("fast-06-monorepo", "azure-cli", "difficult_failure_case"),
+    ("fast-12-compaction", "sepal-ui", "difficult_failure_case"),
+)
+
+
+class CheckerLevel:
+    """Evaluation tiers balancing iteration speed vs empirical rigor."""
+
+    FAST = "FAST"          # 12 tasks, 24 trajectories, 8-12 turn cap, targeted checker
+    DEV = "DEV"            # 25 tasks, 50 trajectories, normal turn cap, full checker
+    RELEASE = "RELEASE"    # 50-200 tasks, paired, interleaved, frozen environment, full accounting
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyParetoMetrics:
+    """Multi-objective metrics for evaluating Pareto frontier improvements."""
+
+    policy: str
+    solve_rate: float
+    tokens_per_solved: float
+    median_tokens: float
+    p95_tokens: float
+    max_tokens: float
+    turns_per_solved: float
+    usd_per_solved: float
+    failure_rate: float
+
+    def dominates(self, other: PolicyParetoMetrics) -> bool:
+        """Returns True if self Pareto-dominates other on solve rate and token efficiency."""
+        better_or_equal = (
+            self.solve_rate >= other.solve_rate
+            and self.tokens_per_solved <= other.tokens_per_solved
+            and self.p95_tokens <= other.p95_tokens
+            and self.failure_rate <= other.failure_rate
+        )
+        strictly_better = (
+            self.solve_rate > other.solve_rate
+            or self.tokens_per_solved < other.tokens_per_solved
+            or self.p95_tokens < other.p95_tokens
+            or self.failure_rate < other.failure_rate
+        )
+        return better_or_equal and strictly_better
+
+
+def select_change_aware_tasks(
+    changed_modules: Sequence[str],
+    candidate_pool: Sequence[tuple[str, str, str]] | None = None,
+    count: int = 4,
+) -> list[tuple[str, str, str]]:
+    """Select diagnostic tasks based on changed modules prioritizing relevant failure modes."""
+    pool = list(candidate_pool or list(FAST12_TASKS) + list(FAST_ADVERSARIAL_TASKS))
+    if not changed_modules:
+        return pool[:count]
+
+    category_affinity: dict[str, int] = {}
+    for mod in changed_modules:
+        m = mod.lower()
+        if any(k in m for k in ("virtual", "output", "compact", "lease", "rent")):
+            for cat in ("state_compaction_stress", "pathological_log_verbosity", "runtime_traceback"):
+                category_affinity[cat] = category_affinity.get(cat, 0) + 10
+        if any(k in m for k in ("verif", "harness", "test", "checker", "assert")):
+            for cat in ("test_harness_complexity", "flaky_verification", "localized_bug"):
+                category_affinity[cat] = category_affinity.get(cat, 0) + 10
+        if any(k in m for k in ("compile", "ir", "ast", "route", "router", "monorepo")):
+            for cat in ("monorepo_navigation", "duplicate_symbol_shadowing", "cross_file_defect", "api_propagation"):
+                category_affinity[cat] = category_affinity.get(cat, 0) + 10
+        if any(k in m for k in ("cache", "fact", "inval", "hash")):
+            for cat in ("schema_data_shape_change", "circular_dependency", "dependency_upgrade"):
+                category_affinity[cat] = category_affinity.get(cat, 0) + 10
+        if any(k in m for k in ("slice", "slicer", "module", "nav")):
+            for cat in ("large_file", "large_scale_hunk_sprawl", "infinite_loop_trap"):
+                category_affinity[cat] = category_affinity.get(cat, 0) + 10
+
+    scored: list[tuple[int, tuple[str, str, str]]] = []
+    for t in pool:
+        score = category_affinity.get(t[2], 0)
+        scored.append((score, t))
+
+    scored.sort(key=lambda item: -item[0])
+
+    selected: list[tuple[str, str, str]] = []
+    seen_cats: set[str] = set()
+    for score, t in scored:
+        if len(selected) >= count:
+            break
+        if t[2] not in seen_cats or score > 0:
+            selected.append(t)
+            seen_cats.add(t[2])
+
+    for score, t in scored:
+        if len(selected) >= count:
+            break
+        if t not in selected:
+            selected.append(t)
+
+    return selected[:count]
+
 
 def get_fast_window(
     fixed_count: int = 8,
@@ -362,6 +488,93 @@ class FastTournamentEvaluator:
             token_ratio=token_ratio,
             mean_utility_delta=mean_u,
             task_results=results,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class StagedEscalationResult:
+    """Outcome of staged escalation through FAST-4, FAST-8, and FAST-12."""
+
+    final_stage: str  # "FAST-4" | "FAST-8" | "FAST-12"
+    verdict: str  # "PROMOTE" | "STRONG_PROMOTE" | "REJECT" | "SEQUENTIAL_KILL"
+    reason: str
+    stages_completed: list[str]
+    tasks_evaluated: int
+    tournament_verdict: TournamentVerdict
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "final_stage": self.final_stage,
+            "verdict": self.verdict,
+            "reason": self.reason,
+            "stages_completed": self.stages_completed,
+            "tasks_evaluated": self.tasks_evaluated,
+            "tournament_verdict": self.tournament_verdict.to_dict(),
+        }
+
+
+class StagedEscalationRunner:
+    """Orchestrates staged escalation FAST-4 -> FAST-8 -> FAST-12 with sequential early stopping."""
+
+    def __init__(self, evaluator: FastTournamentEvaluator | None = None) -> None:
+        self.evaluator = evaluator or FastTournamentEvaluator()
+
+    def run_staged_escalation(
+        self,
+        champion_runs: dict[str, dict[str, Any]],
+        candidate_runs: dict[str, dict[str, Any]],
+        changed_modules: Sequence[str] | None = None,
+    ) -> StagedEscalationResult:
+        stages_done: list[str] = []
+
+        # Stage 1: FAST-4 diagnostic window (change-aware if modules provided)
+        fast4_tasks = (
+            select_change_aware_tasks(changed_modules, count=4)
+            if changed_modules
+            else list(FAST8_INITIAL_TASKS[:4])
+        )
+        stages_done.append("FAST-4")
+        verdict4 = self.evaluator.evaluate_paired_runs(
+            champion_runs, candidate_runs, window_tasks=fast4_tasks
+        )
+        if verdict4.solve_delta <= -2 or verdict4.token_ratio > 1.10:
+            return StagedEscalationResult(
+                final_stage="FAST-4",
+                verdict="SEQUENTIAL_KILL",
+                reason=f"Killed at Stage FAST-4: solve delta {verdict4.solve_delta:+d}, token ratio {verdict4.token_ratio:.2f}x",
+                stages_completed=stages_done,
+                tasks_evaluated=verdict4.tasks_evaluated,
+                tournament_verdict=verdict4,
+            )
+
+        # Stage 2: FAST-8 initial coverage window
+        fast8_tasks = list(FAST8_INITIAL_TASKS)
+        stages_done.append("FAST-8")
+        verdict8 = self.evaluator.evaluate_paired_runs(
+            champion_runs, candidate_runs, window_tasks=fast8_tasks
+        )
+        if verdict8.solve_delta <= -2 or verdict8.token_ratio > 1.05:
+            return StagedEscalationResult(
+                final_stage="FAST-8",
+                verdict="SEQUENTIAL_KILL",
+                reason=f"Killed at Stage FAST-8: solve delta {verdict8.solve_delta:+d}, token ratio {verdict8.token_ratio:.2f}x",
+                stages_completed=stages_done,
+                tasks_evaluated=verdict8.tasks_evaluated,
+                tournament_verdict=verdict8,
+            )
+
+        # Stage 3: Full FAST-12 window
+        stages_done.append("FAST-12")
+        verdict12 = self.evaluator.evaluate_paired_runs(
+            champion_runs, candidate_runs, window_tasks=list(FAST12_TASKS)
+        )
+        return StagedEscalationResult(
+            final_stage="FAST-12",
+            verdict=verdict12.verdict,
+            reason=verdict12.reason,
+            stages_completed=stages_done,
+            tasks_evaluated=verdict12.tasks_evaluated,
+            tournament_verdict=verdict12,
         )
 
 

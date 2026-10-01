@@ -183,11 +183,16 @@ def then_mean_utility_positive(ctx):
     assert ctx["tournament"].mean_utility_delta > 0.0
 
 
-@when('running "mintok dev-eval" via the CLI', target_fixture="ctx")
-def when_run_cli_dev_eval(capsys):
-    ret = mintok_main(["dev-eval"])
+@when(parsers.parse('running "{command}" via the CLI'), target_fixture="ctx")
+def when_run_any_cli(command: str, capsys, ctx=None):
+    if ctx is None:
+        ctx = {}
+    parts = command.replace("mintok ", "").split()
+    ret = mintok_main(parts)
     out = capsys.readouterr().out
-    return {"cli_ret": ret, "cli_out": out}
+    ctx["cli_ret"] = ret
+    ctx["cli_out"] = out
+    return ctx
 
 
 @then(parsers.parse('the CLI stdout contains "{text}"'))
@@ -430,9 +435,81 @@ def then_observed_live_evidence_false(ctx):
     assert "Observed Live Evidence:       YES" not in rendered
 
 
-@when('running "mintok promote v3" via the CLI', target_fixture="ctx")
-def when_run_cli_promote(capsys):
-    ret = mintok_main(["promote", "v3"])
-    out = capsys.readouterr().out
-    return {"cli_ret": ret, "cli_out": out}
+@given(parsers.parse('changed modules "{modules}"'), target_fixture="ctx")
+def given_changed_modules(modules: str):
+    return {"changed_modules": [m.strip() for m in modules.split(",")]}
+
+
+@when("change-aware diagnostic tasks are selected")
+def when_select_change_aware(ctx):
+    from mintok.fast_window import select_change_aware_tasks
+
+    tasks = select_change_aware_tasks(ctx["changed_modules"], count=4)
+    ctx["selected_tasks"] = tasks
+
+
+@then("state compaction and log verbosity stress tasks are prioritized")
+def then_stress_tasks_prioritized(ctx):
+    categories = [t[2] for t in ctx["selected_tasks"]]
+    assert any(c in ("state_compaction_stress", "pathological_log_verbosity", "runtime_traceback") for c in categories)
+
+
+@when("staged escalation FAST-4 to FAST-8 to FAST-12 is executed")
+def when_staged_escalation(ctx):
+    from mintok.fast_window import FAST12_TASKS, StagedEscalationRunner
+
+    runner = StagedEscalationRunner()
+    champ_runs = {tid: {"solved": True, "tokens": 100_000} for tid, _, _ in FAST12_TASKS}
+    cand_runs = {tid: {"solved": True, "tokens": 70_000} for tid, _, _ in FAST12_TASKS}
+    res = runner.run_staged_escalation(champ_runs, cand_runs, changed_modules=ctx.get("changed_modules"))
+    ctx["escalation_result"] = res
+
+
+@then("the candidate advances through staged checkpoints")
+def then_candidate_advances(ctx):
+    res = ctx["escalation_result"]
+    assert "FAST-4" in res.stages_completed
+    assert "FAST-8" in res.stages_completed
+    assert "FAST-12" in res.stages_completed
+    assert res.verdict in ("PROMOTE", "STRONG_PROMOTE")
+
+
+@given("a batch of local and frontier evaluations", target_fixture="ctx")
+def given_evaluations_batch():
+    evals = [
+        {"candidate_id": "c1", "local_passed": True, "frontier_won": True, "local_utility_delta": 0.35, "frontier_utility_delta": 0.40},
+        {"candidate_id": "c2", "local_passed": True, "frontier_won": True, "local_utility_delta": 0.25, "frontier_utility_delta": 0.30},
+        {"candidate_id": "c3", "local_passed": False, "frontier_won": False, "local_utility_delta": -0.20, "frontier_utility_delta": -0.25},
+        {"candidate_id": "c4", "local_passed": True, "frontier_won": False, "local_utility_delta": 0.10, "frontier_utility_delta": -0.05},
+        {"candidate_id": "c5", "local_passed": False, "frontier_won": False, "local_utility_delta": -0.40, "frontier_utility_delta": -0.35},
+    ]
+    return {"evals": evals}
+
+
+@when("funnel calibration metrics are computed")
+def when_compute_funnel_metrics(ctx):
+    from mintok.promotion_funnel import compute_funnel_precision_recall
+
+    metrics = compute_funnel_precision_recall(ctx["evals"])
+    ctx["funnel_metrics"] = metrics
+
+
+@then("precision, recall, and rank correlation are quantified")
+def then_quantify_funnel_metrics(ctx):
+    m = ctx["funnel_metrics"]
+    assert 0.0 <= m.precision <= 1.0
+    assert 0.0 <= m.recall <= 1.0
+    assert m.rank_correlation > 0.70
+
+
+@then("exploration slot routes candidate for audit")
+def then_exploration_slot_routes():
+    from mintok.promotion_funnel import route_exploration_candidate
+
+    routed_promoted = route_exploration_candidate("cand_winner", local_passed=True)
+    assert routed_promoted is True
+    explored = route_exploration_candidate("cand_audit", local_passed=False, exploration_probability=1.0)
+    assert explored is True
+    not_explored = route_exploration_candidate("cand_audit", local_passed=False, exploration_probability=0.0)
+    assert not_explored is False
 

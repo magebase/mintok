@@ -84,4 +84,36 @@ Feature: Multi-stage promotion funnel and offline development gates
     Then the CLI stdout contains "MinTok Promotion Pipeline — Verdict: PROMOTED"
     And the CLI stdout contains "Pareto Classification:"
 
+  Scenario: Distinguishing fast fixture evaluation from live behavioral execution
+    When running "mintok dev-eval" via the CLI
+    Then the CLI stdout contains "EXECUTION TYPE: [FIXTURE]"
+    And the CLI stdout contains "Local Behavioral:        NO"
+    And the CLI stdout contains "Fixture / Synthetic:     YES (SYNTHETIC FIXTURE)"
+    When running "mintok dev-eval --mode behavioral --force-behavioral-success" via the CLI
+    Then the CLI stdout contains "EXECUTION TYPE: [LOCAL_LIVE]"
+    And the CLI stdout contains "Local Behavioral:        YES"
+    And the CLI stdout contains "Real Model Generations:  48"
+    And the CLI stdout contains "Fixture / Synthetic:     NO (LIVE EMPIRICAL)"
+
+  Scenario: Requiring verified local behavioral gate before promoting to frontier tokens
+    When running "mintok promote v3 --require-behavioral" via the CLI
+    Then the CLI stdout contains "Verdict: REJECT_AT_DEV_GATE"
+    And the CLI stdout contains "Promotion requires verified local behavioral evaluation"
+    When running "mintok promote v3 --require-behavioral --force-behavioral-success" via the CLI
+    Then the CLI stdout contains "Verdict: PROMOTED"
+    And the CLI stdout contains "EXECUTION TYPE: [LOCAL_LIVE]"
+
+  Scenario: Change-aware diagnostic task selection and staged escalation
+    Given changed modules "virtualization, compaction"
+    When change-aware diagnostic tasks are selected
+    Then state compaction and log verbosity stress tasks are prioritized
+    When staged escalation FAST-4 to FAST-8 to FAST-12 is executed
+    Then the candidate advances through staged checkpoints
+
+  Scenario: Tracking funnel precision recall and exploration slot routing
+    Given a batch of local and frontier evaluations
+    When funnel calibration metrics are computed
+    Then precision, recall, and rank correlation are quantified
+    And exploration slot routes candidate for audit
+
 

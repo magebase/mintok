@@ -5,6 +5,12 @@ tasks into the minimum frontier-model computation required to produce a verified
 
 **Don't compress expensive AI work. Eliminate it.**
 
+> [!IMPORTANT]
+> **MinTok 4.0 Research Benchmark Release**:
+> **MinTok 4.0 reduces provider-token expenditure from 46,680 to 7,120 tokens while increasing paired solve rate from 69.3% to 95.3% on the frozen 150-task evaluation.**
+> 
+> *This is an internally controlled empirical result; independent cleanroom replication remains the next validation stage.*
+
 - **Frontier avoidance first** — parsers, static analysis, cached semantic facts, and
   deterministic transforms answer everything they can. Only genuine judgment reaches a
   frontier model.

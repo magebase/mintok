@@ -13,3 +13,4 @@ build/
 
 # Editor / OS noise
 .DS_Store
+*.tmp

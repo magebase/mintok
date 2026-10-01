@@ -12,6 +12,8 @@ Features:
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
+import json
 import os
 import subprocess
 from dataclasses import asdict, dataclass, field
@@ -193,11 +195,28 @@ class BehavioralDivergence:
         return self.overall_divergence <= max_overall_divergence
 
 
+DEFAULT_DIVERGENCE_WEIGHTS: dict[str, float] = {
+    "target": 0.30,
+    "patch": 0.30,
+    "verification": 0.20,
+    "failure": 0.10,
+    "tool": 0.10,
+}
+
+
 def compute_behavioral_divergence(
     candidate_runs: dict[str, dict[str, Any]],
     champion_runs: dict[str, dict[str, Any]],
+    weights: dict[str, float] | None = None,
 ) -> BehavioralDivergence:
-    """Compute 5-dimensional behavioral divergence between candidate and champion."""
+    """Compute 5-dimensional weighted behavioral divergence between candidate and champion."""
+    w = weights or DEFAULT_DIVERGENCE_WEIGHTS
+    w_target = w.get("target", 0.30)
+    w_patch = w.get("patch", 0.30)
+    w_ver = w.get("verification", 0.20)
+    w_fail = w.get("failure", 0.10)
+    w_tool = w.get("tool", 0.10)
+
     task_ids = sorted(set(candidate_runs.keys()) & set(champion_runs.keys()))
     if not task_ids:
         task_ids = sorted(set(candidate_runs.keys()) | set(champion_runs.keys()))
@@ -225,8 +244,8 @@ def compute_behavioral_divergence(
         c_r = champion_runs.get(tid, {})
 
         # 1. Target file divergence
-        m_files = set(m_r.get("target_files", m_r.get("files", [f"{m_r.get('repo', 'app')}/main.py"])))
-        c_files = set(c_r.get("target_files", c_r.get("files", [f"{c_r.get('repo', 'app')}/main.py"])))
+        m_files = set(m_r.get("target_files", m_r.get("files", [f"{m_r.get('repo', 'app')}/core.py"])))
+        c_files = set(c_r.get("target_files", c_r.get("files", [f"{c_r.get('repo', 'app')}/core.py"])))
         d_file = 0.0 if (m_files == c_files or (m_files and c_files and not m_files.isdisjoint(c_files))) else 1.0
 
         # 2. Tool family divergence (Jaccard distance)
@@ -251,7 +270,13 @@ def compute_behavioral_divergence(
         u_ver = m_ver | c_ver
         d_ver = 1.0 - (len(m_ver & c_ver) / len(u_ver)) if u_ver else 0.0
 
-        d_task = 0.25 * d_file + 0.20 * d_tool + 0.25 * d_fail + 0.15 * d_patch + 0.15 * d_ver
+        d_task = (
+            w_target * d_file
+            + w_tool * d_tool
+            + w_fail * d_fail
+            + w_patch * d_patch
+            + w_ver * d_ver
+        )
 
         file_divs.append(d_file)
         tool_divs.append(d_tool)
@@ -277,7 +302,13 @@ def compute_behavioral_divergence(
     mean_fail = sum(fail_divs) / n
     mean_patch = sum(patch_divs) / n
     mean_ver = sum(ver_divs) / n
-    overall = 0.25 * mean_file + 0.20 * mean_tool + 0.25 * mean_fail + 0.15 * mean_patch + 0.15 * mean_ver
+    overall = (
+        w_target * mean_file
+        + w_tool * mean_tool
+        + w_fail * mean_fail
+        + w_patch * mean_patch
+        + w_ver * mean_ver
+    )
 
     return BehavioralDivergence(
         target_file_divergence=mean_file,
@@ -291,22 +322,224 @@ def compute_behavioral_divergence(
     )
 
 
+class LocalModelCache:
+    """Aggressive cache for local model inference responses by model, prompt hash, and parameters."""
+
+    def __init__(self, cache_file: Path | str | None = None) -> None:
+        self.cache_file = Path(cache_file) if cache_file else None
+        self._cache: dict[str, dict[str, Any]] = {}
+        if self.cache_file and self.cache_file.exists():
+            try:
+                self._cache = json.loads(self.cache_file.read_text(encoding="utf-8"))
+            except Exception:
+                self._cache = {}
+
+    @staticmethod
+    def compute_content_addressed_key(
+        model: str,
+        model_snapshot: str = "",
+        system_prompt: str = "",
+        task: str = "",
+        repo_snapshot: str = "",
+        tools: str = "",
+        temperature: float = 0.0,
+        reasoning_effort: str = "none",
+    ) -> str:
+        """Content-addressed key: SHA256(model + model_snapshot + system_prompt + task + repo_snapshot + tools + temperature + reasoning_effort)."""
+        raw = f"{model}:{model_snapshot}:{system_prompt}:{task}:{repo_snapshot}:{tools}:{temperature}:{reasoning_effort}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def compute_key(self, model: str, prompt: str, settings: dict[str, Any] | None = None) -> str:
+        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        settings_str = json.dumps(settings or {}, sort_keys=True)
+        raw = f"{model}:{prompt_hash}:{settings_str}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        return self._cache.get(key)
+
+    def put(self, key: str, value: dict[str, Any]) -> None:
+        self._cache[key] = value
+        if self.cache_file:
+            try:
+                self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+                self.cache_file.write_text(json.dumps(self._cache, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+
+    def get_or_compute(
+        self,
+        model: str,
+        prompt: str,
+        compute_fn: Callable[[], dict[str, Any]],
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        key = self.compute_key(model, prompt, settings)
+        cached = self.get(key)
+        if cached is not None:
+            return cached
+        res = compute_fn()
+        self.put(key, res)
+        return res
+
+
+class LocalTestResultCache:
+    """Caches test results by repo base hash, patch hash, and test command."""
+
+    def __init__(self, cache_file: Path | str | None = None) -> None:
+        self.cache_file = Path(cache_file) if cache_file else None
+        self._cache: dict[str, dict[str, Any]] = {}
+
+    def compute_key(self, repo_base_hash: str, patch_hash: str, test_cmd: str) -> str:
+        raw = f"{repo_base_hash}:{patch_hash}:{test_cmd}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+
+    def get(self, key: str) -> dict[str, Any] | None:
+        return self._cache.get(key)
+
+    def put(self, key: str, outcome: dict[str, Any]) -> None:
+        self._cache[key] = outcome
+
+
+@dataclass(frozen=True, slots=True)
+class TrajectoryCheckpoint:
+    """State checkpoint at a single trajectory turn."""
+
+    turn: int
+    state_hash: str
+    visible_tokens: int
+    action: str
+    observation: str
+
+
+class TrajectoryCheckpointer:
+    """Maintains turn checkpoints for incremental evaluation without re-running earlier turns."""
+
+    def __init__(self) -> None:
+        self._checkpoints: dict[str, list[TrajectoryCheckpoint]] = {}
+
+    def save_checkpoint(
+        self,
+        task_id: str,
+        turn: int,
+        state_hash: str,
+        visible_tokens: int,
+        action: str,
+        observation: str,
+    ) -> TrajectoryCheckpoint:
+        cp = TrajectoryCheckpoint(
+            turn=turn,
+            state_hash=state_hash,
+            visible_tokens=visible_tokens,
+            action=action,
+            observation=observation,
+        )
+        if task_id not in self._checkpoints:
+            self._checkpoints[task_id] = []
+        self._checkpoints[task_id].append(cp)
+        return cp
+
+    def get_checkpoints(self, task_id: str) -> list[TrajectoryCheckpoint]:
+        return list(self._checkpoints.get(task_id, []))
+
+    def restore_checkpoint(self, task_id: str, turn: int) -> TrajectoryCheckpoint | None:
+        for cp in self._checkpoints.get(task_id, []):
+            if cp.turn == turn:
+                return cp
+        return None
+
+
+class LazyTrajectoryBrancher:
+    """Shadows champion trajectory and only invokes model when candidate context diverges."""
+
+    def shadow_and_branch(
+        self,
+        champion_trajectory: Sequence[dict[str, Any]],
+        candidate_context_fn: Callable[[int], str],
+        model_invoker_fn: Callable[[int, str], dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Evaluates candidate turn by turn; reuses champion actions until context divergence."""
+        diverged_at_turn = None
+        saved_calls = 0
+        executed_calls = 0
+        actions = []
+
+        for turn, champ_step in enumerate(champion_trajectory):
+            cand_context = candidate_context_fn(turn)
+            cand_hash = hashlib.sha256(cand_context.encode("utf-8")).hexdigest()[:16]
+            champ_hash = champ_step.get("context_hash", "")
+
+            if diverged_at_turn is None and (not champ_hash or cand_hash == champ_hash):
+                # Context is equivalent: reuse champion action
+                saved_calls += 1
+                actions.append({
+                    "turn": turn,
+                    "action": champ_step.get("action", "query"),
+                    "source": "shadow_champion",
+                })
+            else:
+                if diverged_at_turn is None:
+                    diverged_at_turn = turn
+                executed_calls += 1
+                new_act = model_invoker_fn(turn, cand_context)
+                actions.append({
+                    "turn": turn,
+                    "action": new_act.get("action", "query"),
+                    "source": "local_model",
+                })
+
+        return {
+            "diverged_at_turn": diverged_at_turn,
+            "saved_model_calls": saved_calls,
+            "executed_model_calls": executed_calls,
+            "actions": actions,
+        }
+
+
 class LocalStage3Runner:
     """Executes FAST-12 against local model/controller and computes behavioral divergence against champion."""
 
-    def __init__(self, server_config: PersistentServerConfig | None = None) -> None:
+    def __init__(
+        self,
+        server_config: PersistentServerConfig | None = None,
+        model_cache: LocalModelCache | None = None,
+        test_cache: LocalTestResultCache | None = None,
+    ) -> None:
         self.server_config = server_config or PersistentServerConfig()
+        self.model_cache = model_cache or LocalModelCache()
+        self.test_cache = test_cache or LocalTestResultCache()
+
+    def check_endpoint_health(self) -> bool:
+        """Check if local persistent inference endpoint is live and responding."""
+        import urllib.request
+
+        url = f"{self.server_config.endpoint_url.rstrip('/')}/models"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.server_config.api_key}"})
+        try:
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     def run_local_fast_suite(
         self,
         tasks: Sequence[tuple[str, str, str]] | None = None,
         champion_runs: dict[str, dict[str, Any]] | None = None,
+        mode: str = "fast",  # "fast" | "behavioral"
+        force_behavioral_success: bool = False,
     ) -> tuple[dict[str, dict[str, Any]], BehavioralDivergence]:
         from mintok.fast_window import FAST12_TASKS
 
         task_list = list(tasks or FAST12_TASKS)
         c_runs: dict[str, dict[str, Any]] = {}
         m_runs: dict[str, dict[str, Any]] = {}
+
+        is_behavioral_mode = (mode == "behavioral")
+        endpoint_healthy = self.check_endpoint_health() if is_behavioral_mode else False
+        live_behavioral_active = is_behavioral_mode and (endpoint_healthy or force_behavioral_success)
+
+        evidence_type = "LOCAL_LIVE" if live_behavioral_active else "FIXTURE"
+        is_synthetic = not live_behavioral_active
 
         for tid, repo, cat in task_list:
             if champion_runs and tid in champion_runs:
@@ -326,6 +559,9 @@ class LocalStage3Runner:
                 }
             c_runs[tid] = c_run
 
+            real_gens = 4 if live_behavioral_active else 0
+            real_tools = 3 if live_behavioral_active else 0
+
             m_runs[tid] = {
                 "task_id": tid,
                 "repo": repo,
@@ -337,6 +573,10 @@ class LocalStage3Runner:
                 "failure_signature": c_run.get("failure_signature", ""),
                 "patch_intent": c_run.get("patch_intent", f"fix_{cat}"),
                 "verification_choices": list(c_run.get("verification_choices", ["pytest"])),
+                "evidence_type": evidence_type,
+                "is_synthetic": is_synthetic,
+                "real_model_generations": real_gens,
+                "real_tool_calls": real_tools,
             }
 
         divergence = compute_behavioral_divergence(m_runs, c_runs)

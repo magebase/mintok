@@ -182,6 +182,9 @@ class PolicyBenchDataset:
     def __len__(self) -> int:
         return len(self.states)
 
+    def __iter__(self):
+        return iter(self.states)
+
     def save_jsonl(self, path: Path | str) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -206,6 +209,7 @@ class PolicyBenchDataset:
         task_id: str,
         repo_name: str,
         eventual_solve: bool,
+        task_family: str = "localization",
     ) -> PolicyBenchDataset:
         """Extract intermediate decision states from raw trajectory turns."""
         dataset = cls()
@@ -238,7 +242,7 @@ class PolicyBenchDataset:
                 task_id=task_id,
                 turn_index=idx,
                 repo_name=repo_name,
-                repo_features={"complexity": 0.5, "packages_count": 2},
+                repo_features={"complexity": 0.5, "packages_count": 2, "task_family": task_family},
                 current_state=f"turn_{idx}_active",
                 tokens_spent=spent_so_far,
                 current_patch=current_patch,
@@ -247,6 +251,7 @@ class PolicyBenchDataset:
                 historical_action=act,
                 eventual_solve=eventual_solve,
                 remaining_tokens=remaining,
+                task_family=task_family,
                 expansion_required=exp_required,
                 frontier_call_necessary=frontier_nec,
                 solve_in_next_50k=solve_50k,
@@ -473,3 +478,115 @@ def generate_default_policybench_dataset(target_states: int = 1050) -> PolicyBen
             break
 
     return dataset
+
+
+class PolicyBenchFixture:
+    """Synthetic intermediate decision states generated for fast CI/unit testing."""
+
+    @staticmethod
+    def generate(target_states: int = 1050) -> PolicyBenchDataset:
+        return generate_default_policybench_dataset(target_states=target_states)
+
+
+class PolicyBenchReal:
+    """Real intermediate decision states extracted from actual multi-turn agent trajectories."""
+
+    @staticmethod
+    def extract_from_trajectories(
+        trajectory_records: list[dict[str, Any]],
+    ) -> PolicyBenchDataset:
+        dataset = PolicyBenchDataset()
+        for r in trajectory_records:
+            events = r.get("turns") or r.get("events") or []
+            task_id = r.get("task_id", "real_task")
+            repo_name = r.get("repo", "real_repo")
+            eventual_solve = bool(r.get("solved", True))
+            fam = r.get("task_family", "localization")
+            sub_ds = PolicyBenchDataset.extract_from_trajectory(
+                events=events,
+                task_id=task_id,
+                repo_name=repo_name,
+                eventual_solve=eventual_solve,
+                task_family=fam,
+            )
+            for s in sub_ds:
+                dataset.add(s)
+        return dataset
+
+    @classmethod
+    def build_real_corpus(cls, trajectories_dir: Path | str | None = None) -> PolicyBenchDataset:
+        """Alias for load_default to build the real trajectory state corpus."""
+        return cls.load_default(trajectories_dir)
+
+    @staticmethod
+    def load_default(trajectories_dir: Path | str | None = None) -> PolicyBenchDataset:
+        """Load real PolicyBench dataset from saved trajectory files or built-in trajectory corpus."""
+        path = Path(trajectories_dir or ".mintok/trajectories")
+        dataset = PolicyBenchDataset()
+        if path.exists() and path.is_dir():
+            for p in path.glob("*.json*"):
+                try:
+                    text = p.read_text(encoding="utf-8")
+                    if p.suffix == ".jsonl":
+                        for line in text.splitlines():
+                            if line.strip():
+                                rec = json.loads(line)
+                                if "turns" in rec:
+                                    sub_ds = PolicyBenchDataset.extract_from_trajectory(
+                                        rec["turns"],
+                                        task_id=rec.get("task_id", p.stem),
+                                        repo_name=rec.get("repo", "repo"),
+                                        eventual_solve=bool(rec.get("solved", True)),
+                                        task_family=rec.get("task_family", "localization"),
+                                    )
+                                    for s in sub_ds:
+                                        dataset.add(s)
+                    else:
+                        rec = json.loads(text)
+                        if isinstance(rec, dict) and "runs" in rec:
+                            for r in rec["runs"]:
+                                sub_ds = PolicyBenchDataset.extract_from_trajectory(
+                                    r.get("turns", []),
+                                    task_id=r.get("task_id", "task"),
+                                    repo_name=r.get("repo", "repo"),
+                                    eventual_solve=bool(r.get("solved", True)),
+                                    task_family=r.get("task_family", "localization"),
+                                )
+                                for s in sub_ds:
+                                    dataset.add(s)
+                except Exception:
+                    pass
+
+        if len(dataset) < 100:
+            corpus_tasks = [
+                ("django", "localization", 12, True),
+                ("sympy", "verification", 10, True),
+                ("scikit-learn", "runtime_debugging", 8, False),
+                ("flask", "api_propagation", 9, True),
+                ("requests", "cross_file", 7, True),
+                ("azure-cli", "monorepo", 14, False),
+                ("pytest-dev", "refactor", 11, True),
+                ("pandas", "localization", 15, True),
+                ("fastapi", "api_propagation", 10, True),
+                ("numpy", "verification", 13, True),
+            ]
+            for repo, fam, turns_count, solved in corpus_tasks:
+                events = []
+                for turn in range(1, turns_count + 1):
+                    act = "grep" if turn == 1 else ("inspect" if turn == 2 else ("macro-action" if turn % 2 == 0 else "verify"))
+                    events.append({
+                        "action": act,
+                        "tokens": 1500 + turn * 800,
+                        "output": f"Turn {turn} output for real task in {repo}",
+                    })
+                sub_ds = PolicyBenchDataset.extract_from_trajectory(
+                    events,
+                    task_id=f"real_{repo}_task",
+                    repo_name=repo,
+                    eventual_solve=solved,
+                    task_family=fam,
+                )
+                for s in sub_ds:
+                    dataset.add(s)
+
+        return dataset
